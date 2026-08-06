@@ -99,8 +99,19 @@ class BatchSpeedTestResponse(BaseModel):
 
 
 def _expand_tests(req: BatchSpeedTestRequest) -> list[BatchSpeedTestItem]:
-    """Expand tests × iterations into a flat list."""
-    return [item for item in req.tests for _ in range(req.iterations)]
+    """按 provider 分桶，桶内按模型 round-robin 展开为 iterations 轮。
+
+    同一 provider 的各模型在同一轮里依次排列，跨 provider 独立；展开顺序只影响
+    任务进入信号量的先后，配合 per-provider 信号量实现各模型均衡压力。
+    """
+    buckets: dict[tuple[str, str], list[BatchSpeedTestItem]] = {}
+    for item in req.tests:
+        buckets.setdefault((item.base_url, item.api_key), []).append(item)
+    items: list[BatchSpeedTestItem] = []
+    for bucket in buckets.values():
+        for _ in range(req.iterations):
+            items.extend(bucket)
+    return items
 
 
 def _to_error_result(item: BatchSpeedTestItem, req: BatchSpeedTestRequest, error: BaseException, now_iso: str) -> dict:
@@ -142,17 +153,22 @@ def compute_summary(parsed: list[SpeedTestResult]) -> BatchSummary:
 
 
 async def _iter_batch_results(req: BatchSpeedTestRequest):
-    """Run all tests with the configured concurrency, yielding each result as it completes.
+    """Run all tests, yielding each result as it completes.
 
-    Exceptions are captured per item into error results. On early termination
-    (e.g. SSE client disconnect), remaining tasks are cancelled.
+    并发按 provider(base_url+api_key) 分桶，每桶独立 Semaphore(req.concurrency)，
+    不同 provider 互不挤占。异常按 item 兜底为 error result。SSE 客户端提前断开时
+    取消剩余任务。
     """
     now_iso = datetime.now(timezone.utc).isoformat()
-    semaphore = asyncio.Semaphore(req.concurrency)
     items = _expand_tests(req)
+    semaphores: dict[tuple[str, str], asyncio.Semaphore] = {}
+    for it in items:
+        key = (it.base_url, it.api_key)
+        semaphores.setdefault(key, asyncio.Semaphore(req.concurrency))
 
     async def run_one(item):
-        async with semaphore:
+        sem = semaphores[(item.base_url, item.api_key)]
+        async with sem:
             try:
                 return await run_speed_test(
                     base_url=item.base_url,
@@ -298,7 +314,7 @@ def _schedule_response(s: dict) -> ScheduleResponse:
         interval_minutes=s["interval_minutes"],
         targets=[ScheduleTarget(**t) for t in s.get("targets", [])],
         prompt=s.get("prompt") or "",
-        max_tokens=s.get("max_tokens") or 128,
+        max_tokens=s.get("max_tokens") or 256,
         temperature=s.get("temperature") if s.get("temperature") is not None else 0.7,
         stream=bool(s.get("stream")),
         concurrency=s.get("concurrency") or 1,

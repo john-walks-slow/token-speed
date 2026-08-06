@@ -109,7 +109,7 @@ class SpeedTestScheduler:
             results = await execute_batch_tests(
                 tests,
                 prompt=sched["prompt"] or "",
-                max_tokens=sched["max_tokens"] or 128,
+                max_tokens=sched["max_tokens"] or 256,
                 temperature=sched["temperature"] if sched["temperature"] is not None else 0.7,
                 stream=bool(sched["stream"]),
                 concurrency=sched["concurrency"] or 1,

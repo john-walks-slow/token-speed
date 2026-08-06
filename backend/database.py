@@ -44,7 +44,7 @@ def _get_conn():
             enabled          INTEGER DEFAULT 1,
             interval_minutes INTEGER NOT NULL,
             prompt           TEXT,
-            max_tokens       INTEGER DEFAULT 128,
+            max_tokens       INTEGER DEFAULT 256,
             temperature      REAL DEFAULT 0.7,
             stream           INTEGER DEFAULT 1,
             concurrency      INTEGER DEFAULT 1,

@@ -12,7 +12,7 @@ export interface TestParamsValues {
 
 export const DEFAULT_PARAMS: TestParamsValues = {
   prompt: "Hello, tell me a short story in 3 sentences.",
-  maxTokens: 128,
+  maxTokens: 256,
   temperature: 0.7,
   concurrency: 1,
   iterations: 1,

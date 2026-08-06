@@ -34,7 +34,7 @@ async def run_speed_test(
     api_key: str = "",
     model: str = "",
     prompt: str = "Hello, tell me a short story in 3 sentences.",
-    max_tokens: int = 128,
+    max_tokens: int = 256,
     temperature: float = 0.7,
     stream: bool = False,
 ) -> dict:
@@ -196,32 +196,53 @@ async def execute_batch_tests(
 ) -> list[dict]:
     """批量执行测速并入库。batch 端点与定时调度器共用。
 
-    返回每个测试的结果 dict（异常以失败结果兜底）。schedule_id 非空时标记到历史。
+    并发按 provider(base_url+api_key) 分桶：每个 provider 独占一个 Semaphore(concurrency)，
+    不同 provider 互不挤占。桶内按模型 round-robin 交错展开（每轮迭代依次取各 model），
+    使同 provider 各模型在相同并发密度下被测。返回每个测试的结果 dict（异常以失败结果兜底）。
+    schedule_id 非空时标记到历史。
     """
-    all_tasks = []
-    for test in tests:
+    # 按 provider 分桶，桶内保留原始 model 顺序
+    buckets: dict[tuple[str, str], list[dict]] = {}
+    for t in tests:
+        key = (t["base_url"], t.get("api_key", ""))
+        buckets.setdefault(key, []).append(t)
+
+    # 桶内按模型 round-robin 展开
+    all_items: list[dict] = []
+    for items in buckets.values():
         for _ in range(iterations):
-            all_tasks.append(
-                run_speed_test(
-                    base_url=test["base_url"],
-                    api_key=test.get("api_key", ""),
-                    model=test["model"],
+            all_items.extend(items)
+
+    semaphores = {key: asyncio.Semaphore(concurrency) for key in buckets}
+
+    async def run_one(item: dict) -> dict:
+        sem = semaphores[(item["base_url"], item.get("api_key", ""))]
+        async with sem:
+            try:
+                return await run_speed_test(
+                    base_url=item["base_url"],
+                    api_key=item.get("api_key", ""),
+                    model=item["model"],
                     prompt=prompt,
                     max_tokens=max_tokens,
                     temperature=temperature,
                     stream=stream,
                 )
-            )
+            except Exception as e:
+                return _batch_error_result(e, prompt, max_tokens, temperature)
 
-    semaphore = asyncio.Semaphore(concurrency)
+    results = await asyncio.gather(*[run_one(it) for it in all_items], return_exceptions=True)
+    results = [r if not isinstance(r, Exception) else _batch_error_result(r, prompt, max_tokens, temperature) for r in results]
 
-    async def run_with_semaphore(task):
-        async with semaphore:
-            return await task
+    for r in results:
+        await insert_speed_test(r, schedule_id)
 
-    results = await asyncio.gather(*[run_with_semaphore(t) for t in all_tasks], return_exceptions=True)
-    now_iso = datetime.now(timezone.utc).isoformat()
-    results = [r if not isinstance(r, Exception) else {
+    return results
+
+
+def _batch_error_result(exc: BaseException, prompt: str, max_tokens: int, temperature: float) -> dict:
+    """构造批量测速的失败兜底结果。"""
+    return {
         "id": str(uuid.uuid4()),
         "base_url": "",
         "model": "error",
@@ -238,12 +259,7 @@ async def execute_batch_tests(
         "tps": 0,
         "tpm": 0,
         "success": False,
-        "error_message": str(r),
-        "created_at": now_iso,
-    } for r in results]
-
-    for r in results:
-        await insert_speed_test(r, schedule_id)
-
-    return results
+        "error_message": str(exc),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
 

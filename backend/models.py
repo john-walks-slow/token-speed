@@ -24,7 +24,7 @@ class SpeedTestRequest(BaseModel):
     api_key: str = ""
     model: str
     prompt: str = "Hello, tell me a short story in 3 sentences."
-    max_tokens: int = 128
+    max_tokens: int = 256
     temperature: float = 0.7
     stream: bool = False
 
@@ -38,7 +38,7 @@ class BatchSpeedTestItem(BaseModel):
 class BatchSpeedTestRequest(BaseModel):
     tests: list[BatchSpeedTestItem]
     prompt: str = "Hello, tell me a short story in 3 sentences."
-    max_tokens: int = 128
+    max_tokens: int = 256
     temperature: float = 0.7
     concurrency: int = 1
     iterations: int = 1
@@ -140,7 +140,7 @@ class ScheduleCreate(BaseModel):
     interval_minutes: int
     targets: list[ScheduleTarget]
     prompt: str = "Hello, tell me a short story in 3 sentences."
-    max_tokens: int = 128
+    max_tokens: int = 256
     temperature: float = 0.7
     stream: bool = True
     concurrency: int = 1
@@ -166,7 +166,7 @@ class ScheduleResponse(BaseModel):
     interval_minutes: int
     targets: list[ScheduleTarget] = []
     prompt: str = ""
-    max_tokens: int = 128
+    max_tokens: int = 256
     temperature: float = 0.7
     stream: bool = True
     concurrency: int = 1
