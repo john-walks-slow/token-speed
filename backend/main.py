@@ -1,11 +1,20 @@
-from fastapi import FastAPI, Query
+import asyncio
+import json
+import uuid
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from .database import (
     insert_speed_test, get_all_tests, get_test_by_id, delete_test, delete_all_tests, get_stats,
     list_providers, get_provider, create_provider, update_provider, delete_provider,
     save_provider_models,
+    list_schedules, get_schedule, create_schedule, update_schedule, delete_schedule,
+    set_schedule_enabled,
 )
 from .models import (
     ConnectRequest,
@@ -21,11 +30,26 @@ from .models import (
     ProviderModelsUpdate,
     ProviderResponse,
     ProviderListResponse,
+    ScheduleCreate,
+    ScheduleUpdate,
+    ScheduleTarget,
+    ScheduleResponse,
 )
+from .scheduler import SpeedTestScheduler
 from .speed_test import list_models, run_speed_test
 
 
-app = FastAPI(title="Token Speed", version="1.0.0")
+scheduler = SpeedTestScheduler()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await scheduler.start()
+    yield
+    await scheduler.stop()
+
+
+app = FastAPI(title="Token Speed", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -64,7 +88,6 @@ class BatchSummary(BaseModel):
     successful: int
     failed: int
     avg_tps: float
-    avg_tpm: float
     avg_latency_ms: float
     best_model: str = ""
     best_tps: float = 0
@@ -75,39 +98,20 @@ class BatchSpeedTestResponse(BaseModel):
     summary: BatchSummary
 
 
-@app.post("/api/speed-test/batch", response_model=BatchSpeedTestResponse)
-async def batch_speed_test(req: BatchSpeedTestRequest):
-    import asyncio
-    import uuid
-    from datetime import datetime, timezone
+def _expand_tests(req: BatchSpeedTestRequest) -> list[BatchSpeedTestItem]:
+    """Expand tests × iterations into a flat list."""
+    return [item for item in req.tests for _ in range(req.iterations)]
 
-    all_tasks = []
-    for test in req.tests:
-        for _ in range(req.iterations):
-            all_tasks.append(
-                run_speed_test(
-                    base_url=test.base_url,
-                    api_key=test.api_key,
-                    model=test.model,
-                    prompt=req.prompt,
-                    max_tokens=req.max_tokens,
-                    temperature=req.temperature,
-                    stream=req.stream,
-                )
-            )
 
-    semaphore = asyncio.Semaphore(req.concurrency)
-
-    async def run_with_semaphore(task):
-        async with semaphore:
-            return await task
-
-    results = await asyncio.gather(*[run_with_semaphore(t) for t in all_tasks], return_exceptions=True)
-    now_iso = datetime.now(timezone.utc).isoformat()
-    results = [r if not isinstance(r, Exception) else {
+def _to_error_result(item: BatchSpeedTestItem, req: BatchSpeedTestRequest, error: BaseException, now_iso: str) -> dict:
+    return {
         "id": str(uuid.uuid4()),
-        "base_url": "",
-        "model": "error",\n        "actual_model": "error",\n        "content_ttft_ms": None,\n        "reasoning_tokens": 0,\n        "content_tokens": 0,
+        "base_url": item.base_url,
+        "model": item.model,
+        "actual_model": "error",
+        "content_ttft_ms": None,
+        "reasoning_tokens": 0,
+        "content_tokens": 0,
         "prompt": req.prompt,
         "max_tokens": req.max_tokens,
         "temperature": req.temperature,
@@ -115,37 +119,100 @@ async def batch_speed_test(req: BatchSpeedTestRequest):
         "total_latency_ms": 0,
         "tokens_generated": 0,
         "tps": 0,
-        "tpm": 0,
         "success": False,
-        "error_message": str(r),
+        "error_message": str(error),
         "created_at": now_iso,
-    } for r in results]
+    }
+
+
+def compute_summary(parsed: list[SpeedTestResult]) -> BatchSummary:
+    successful = [r for r in parsed if r.success]
+    avg_tps = sum(r.tps for r in successful) / len(successful) if successful else 0
+    avg_lat = sum(r.total_latency_ms for r in successful) / len(successful) if successful else 0
+    best = max(successful, key=lambda r: r.tps) if successful else None
+    return BatchSummary(
+        total_tests=len(parsed),
+        successful=len(successful),
+        failed=len(parsed) - len(successful),
+        avg_tps=round(avg_tps, 2),
+        avg_latency_ms=round(avg_lat, 2),
+        best_model=best.model if best else "",
+        best_tps=best.tps if best else 0,
+    )
+
+
+async def _iter_batch_results(req: BatchSpeedTestRequest):
+    """Run all tests with the configured concurrency, yielding each result as it completes.
+
+    Exceptions are captured per item into error results. On early termination
+    (e.g. SSE client disconnect), remaining tasks are cancelled.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    semaphore = asyncio.Semaphore(req.concurrency)
+    items = _expand_tests(req)
+
+    async def run_one(item):
+        async with semaphore:
+            try:
+                return await run_speed_test(
+                    base_url=item.base_url,
+                    api_key=item.api_key,
+                    model=item.model,
+                    prompt=req.prompt,
+                    max_tokens=req.max_tokens,
+                    temperature=req.temperature,
+                    stream=req.stream,
+                )
+            except Exception as e:
+                return _to_error_result(item, req, e, now_iso)
+
+    tasks = [asyncio.create_task(run_one(item)) for item in items]
+    try:
+        for coro in asyncio.as_completed(tasks):
+            yield await coro
+    finally:
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@app.post("/api/speed-test/batch", response_model=BatchSpeedTestResponse)
+async def batch_speed_test(req: BatchSpeedTestRequest):
+    results = [r async for r in _iter_batch_results(req)]
 
     # Save all results
     for r in results:
         await insert_speed_test(r)
 
     parsed = [SpeedTestResult(**r) for r in results]
+    return BatchSpeedTestResponse(results=parsed, summary=compute_summary(parsed))
 
-    successful = [r for r in parsed if r.success]
-    avg_tps = sum(r.tps for r in successful) / len(successful) if successful else 0
-    avg_tpm = sum(r.tpm for r in successful) / len(successful) if successful else 0
-    avg_lat = sum(r.total_latency_ms for r in successful) / len(successful) if successful else 0
 
-    best = max(successful, key=lambda r: r.tps) if successful else None
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
-    summary = BatchSummary(
-        total_tests=len(parsed),
-        successful=len(successful),
-        failed=len(parsed) - len(successful),
-        avg_tps=round(avg_tps, 2),
-        avg_tpm=round(avg_tpm, 2),
-        avg_latency_ms=round(avg_lat, 2),
-        best_model=best.model if best else "",
-        best_tps=best.tps if best else 0,
+
+@app.post("/api/speed-test/batch-stream")
+async def batch_speed_test_stream(req: BatchSpeedTestRequest):
+    total = len(req.tests) * req.iterations
+
+    async def event_stream():
+        results = []
+        async for result in _iter_batch_results(req):
+            results.append(result)
+            await insert_speed_test(result)
+            yield _sse("progress", {"index": len(results), "total": total, "result": result})
+
+        parsed = [SpeedTestResult(**r) for r in results]
+        yield _sse("summary", {"results": results, "summary": compute_summary(parsed).model_dump()})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-
-    return BatchSpeedTestResponse(results=parsed, summary=summary)
 
 
 @app.get("/api/history", response_model=list[SpeedTestHistory])
@@ -166,7 +233,6 @@ async def history_detail(test_id: str):
 async def remove_test(test_id: str):
     ok = await delete_test(test_id)
     if not ok:
-        from fastapi import HTTPException
         raise HTTPException(404, "Test not found")
     return {"message": "Test deleted"}
 
@@ -201,7 +267,6 @@ async def add_provider(req: ProviderCreate):
 async def edit_provider(provider_id: str, req: ProviderUpdate):
     p = await update_provider(provider_id, req.name, req.base_url, req.api_key, models=req.models)
     if p is None:
-        from fastapi import HTTPException
         raise HTTPException(404, "Provider not found")
     return ProviderResponse(**p)
 
@@ -210,7 +275,6 @@ async def edit_provider(provider_id: str, req: ProviderUpdate):
 async def update_provider_models(provider_id: str, req: ProviderModelsUpdate):
     p = await save_provider_models(provider_id, req.models)
     if p is None:
-        from fastapi import HTTPException
         raise HTTPException(404, "Provider not found")
     return ProviderResponse(**p)
 
@@ -219,9 +283,91 @@ async def update_provider_models(provider_id: str, req: ProviderModelsUpdate):
 async def remove_provider(provider_id: str):
     ok = await delete_provider(provider_id)
     if not ok:
-        from fastapi import HTTPException
         raise HTTPException(404, "Provider not found")
     return {"message": "Provider deleted"}
+
+
+# ── Schedule CRUD ─────────────────────────────────────────────
+
+
+def _schedule_response(s: dict) -> ScheduleResponse:
+    return ScheduleResponse(
+        id=s["id"],
+        name=s["name"] or "",
+        enabled=bool(s["enabled"]),
+        interval_minutes=s["interval_minutes"],
+        targets=[ScheduleTarget(**t) for t in s.get("targets", [])],
+        prompt=s.get("prompt") or "",
+        max_tokens=s.get("max_tokens") or 128,
+        temperature=s.get("temperature") if s.get("temperature") is not None else 0.7,
+        stream=bool(s.get("stream")),
+        concurrency=s.get("concurrency") or 1,
+        iterations=s.get("iterations") or 1,
+        created_at=s.get("created_at") or "",
+        updated_at=s.get("updated_at") or "",
+        last_run_at=s.get("last_run_at"),
+        next_run_at=s.get("next_run_at"),
+        last_run_status=s.get("last_run_status"),
+    )
+
+
+@app.get("/api/schedules", response_model=list[ScheduleResponse])
+async def get_schedules():
+    schedules = await list_schedules()
+    return [_schedule_response(s) for s in schedules]
+
+
+@app.post("/api/schedules", response_model=ScheduleResponse, status_code=201)
+async def add_schedule(req: ScheduleCreate):
+    s = await create_schedule(
+        name=req.name,
+        interval_minutes=req.interval_minutes,
+        targets=[t.model_dump() for t in req.targets],
+        prompt=req.prompt,
+        max_tokens=req.max_tokens,
+        temperature=req.temperature,
+        stream=req.stream,
+        concurrency=req.concurrency,
+        iterations=req.iterations,
+    )
+    return _schedule_response(s)
+
+
+@app.put("/api/schedules/{schedule_id}", response_model=ScheduleResponse)
+async def edit_schedule(schedule_id: str, req: ScheduleUpdate):
+    # model_dump 已把 ScheduleTarget 转成 dict，无需再 model_dump
+    fields = req.model_dump(exclude_unset=True)
+    s = await update_schedule(schedule_id, fields)
+    if s is None:
+        raise HTTPException(404, "Schedule not found")
+    return _schedule_response(s)
+
+
+@app.delete("/api/schedules/{schedule_id}")
+async def remove_schedule(schedule_id: str):
+    ok = await delete_schedule(schedule_id)
+    if not ok:
+        raise HTTPException(404, "Schedule not found")
+    return {"message": "Schedule deleted"}
+
+
+@app.put("/api/schedules/{schedule_id}/toggle", response_model=ScheduleResponse)
+async def toggle_schedule(schedule_id: str, enabled: bool = Query(...)):
+    s = await set_schedule_enabled(schedule_id, enabled)
+    if s is None:
+        raise HTTPException(404, "Schedule not found")
+    return _schedule_response(s)
+
+
+@app.post("/api/schedules/{schedule_id}/run", response_model=ScheduleResponse)
+async def run_schedule_now(schedule_id: str):
+    if scheduler.is_running(schedule_id):
+        raise HTTPException(409, "Schedule is already running")
+    s = await get_schedule(schedule_id)
+    if s is None:
+        raise HTTPException(404, "Schedule not found")
+    scheduler.spawn_run(schedule_id, advance_next=False)
+    return _schedule_response(s)
 
 
 # ── Connection ─────────────────────────────────────────────────

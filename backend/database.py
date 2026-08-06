@@ -25,7 +25,6 @@ def _get_conn():
             total_latency_ms REAL,
             tokens_generated INTEGER,
             tps             REAL,
-            tpm             REAL,
             success         INTEGER,
             error_message   TEXT,
             created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -39,12 +38,31 @@ def _get_conn():
             created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
+        _local.conn.execute("""CREATE TABLE IF NOT EXISTS schedules (
+            id               TEXT PRIMARY KEY,
+            name             TEXT NOT NULL,
+            enabled          INTEGER DEFAULT 1,
+            interval_minutes INTEGER NOT NULL,
+            prompt           TEXT,
+            max_tokens       INTEGER DEFAULT 128,
+            temperature      REAL DEFAULT 0.7,
+            stream           INTEGER DEFAULT 1,
+            concurrency      INTEGER DEFAULT 1,
+            iterations       INTEGER DEFAULT 1,
+            targets_json     TEXT DEFAULT '[]',
+            created_at       TIMESTAMP,
+            updated_at       TIMESTAMP,
+            last_run_at      TIMESTAMP,
+            next_run_at      TIMESTAMP,
+            last_run_status  TEXT
+        )""")
         # Migrations for schema additions
         for col_def in [
             "actual_model TEXT DEFAULT ''",
             "content_ttft_ms REAL",
             "reasoning_tokens INTEGER DEFAULT 0",
             "content_tokens INTEGER DEFAULT 0",
+            "schedule_id TEXT",
         ]:
             col_name = col_def.split()[0]
             try:
@@ -77,13 +95,13 @@ def _fetchone(sql, params=None):
     return dict(row) if row else None
 
 
-async def insert_speed_test(result: dict) -> None:
+async def insert_speed_test(result: dict, schedule_id: str | None = None) -> None:
     _run(
         """INSERT INTO speed_tests
            (id, base_url, model, actual_model, prompt, max_tokens, temperature,
             ttft_ms, content_ttft_ms, total_latency_ms, tokens_generated,
-            reasoning_tokens, content_tokens, tps, tpm,
-            success, error_message, created_at)
+            reasoning_tokens, content_tokens, tps,
+            success, error_message, created_at, schedule_id)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             result["id"],
@@ -100,10 +118,10 @@ async def insert_speed_test(result: dict) -> None:
             result.get("reasoning_tokens", 0),
             result.get("content_tokens", 0),
             result["tps"],
-            result["tpm"],
             1 if result["success"] else 0,
             result.get("error_message"),
             result.get("created_at"),
+            schedule_id,
         ),
     )
 
@@ -140,7 +158,6 @@ async def get_stats() -> dict:
             "total_tests": 0,
             "success_rate": 0,
             "avg_tps": 0,
-            "avg_tpm": 0,
             "avg_latency_ms": 0,
             "avg_ttft_ms": None,
             "tests_by_model": [],
@@ -151,7 +168,6 @@ async def get_stats() -> dict:
         """SELECT
             CAST(SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) AS REAL) / COUNT(*) as success_rate,
             AVG(tps) as avg_tps,
-            AVG(tpm) as avg_tpm,
             AVG(total_latency_ms) as avg_latency_ms,
             AVG(CASE WHEN ttft_ms IS NOT NULL THEN ttft_ms ELSE NULL END) as avg_ttft_ms
         FROM speed_tests"""
@@ -169,7 +185,6 @@ async def get_stats() -> dict:
         "total_tests": total,
         "success_rate": round(stats["success_rate"] * 100, 1) if stats["success_rate"] else 0,
         "avg_tps": round(stats["avg_tps"], 2) if stats["avg_tps"] else 0,
-        "avg_tpm": round(stats["avg_tpm"], 2) if stats["avg_tpm"] else 0,
         "avg_latency_ms": round(stats["avg_latency_ms"], 2) if stats["avg_latency_ms"] else 0,
         "avg_ttft_ms": round(stats["avg_ttft_ms"], 2) if stats.get("avg_ttft_ms") else None,
         "tests_by_model": by_model,
@@ -241,4 +256,157 @@ async def delete_provider(provider_id: str) -> bool:
         return False
     _run("DELETE FROM providers WHERE id = ?", (provider_id,))
     return True
+
+
+# ── Schedule CRUD ──────────────────────────────────────────────
+
+
+def _enrich_schedule(row: dict) -> dict:
+    d = dict(row)
+    try:
+        d["targets"] = json.loads(d.get("targets_json", "[]"))
+    except (json.JSONDecodeError, TypeError):
+        d["targets"] = []
+    return d
+
+
+async def list_schedules() -> list[dict]:
+    rows = _fetchall("SELECT * FROM schedules ORDER BY created_at ASC")
+    return [_enrich_schedule(r) for r in rows]
+
+
+async def get_schedule(schedule_id: str) -> dict | None:
+    row = _fetchone("SELECT * FROM schedules WHERE id = ?", (schedule_id,))
+    return _enrich_schedule(row) if row else None
+
+
+async def create_schedule(
+    name: str,
+    interval_minutes: int,
+    targets: list[dict],
+    prompt: str,
+    max_tokens: int,
+    temperature: float,
+    stream: bool,
+    concurrency: int,
+    iterations: int,
+) -> dict:
+    sid = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    _run(
+        """INSERT INTO schedules
+           (id, name, enabled, interval_minutes, prompt, max_tokens, temperature,
+            stream, concurrency, iterations, targets_json,
+            created_at, updated_at, next_run_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            sid, name, 1, interval_minutes, prompt, max_tokens, temperature,
+            1 if stream else 0, concurrency, iterations,
+            json.dumps(targets), now, now,
+            _next_run_iso(now, interval_minutes),
+        ),
+    )
+    return await get_schedule(sid)
+
+
+async def update_schedule(schedule_id: str, fields: dict) -> dict | None:
+    existing = await get_schedule(schedule_id)
+    if not existing:
+        return None
+    now = datetime.now(timezone.utc).isoformat()
+    m = {
+        "name": fields.get("name", existing["name"]),
+        "interval_minutes": fields.get("interval_minutes", existing["interval_minutes"]),
+        "targets_json": json.dumps(fields["targets"]) if "targets" in fields else existing["targets_json"],
+        "prompt": fields.get("prompt", existing["prompt"]),
+        "max_tokens": fields.get("max_tokens", existing["max_tokens"]),
+        "temperature": fields.get("temperature", existing["temperature"]),
+        "stream": int(bool(fields.get("stream", existing["stream"]))),
+        "concurrency": fields.get("concurrency", existing["concurrency"]),
+        "iterations": fields.get("iterations", existing["iterations"]),
+        "enabled": int(bool(fields.get("enabled", existing["enabled"]))),
+    }
+    # 编辑后重置下次执行时间，从此刻开始计时
+    m["next_run_at"] = _next_run_iso(now, m["interval_minutes"])
+    m["updated_at"] = now
+    _run(
+        """UPDATE schedules SET
+           name=?, interval_minutes=?, targets_json=?, prompt=?, max_tokens=?,
+           temperature=?, stream=?, concurrency=?, iterations=?, enabled=?,
+           next_run_at=?, updated_at=?
+           WHERE id=?""",
+        (
+            m["name"], m["interval_minutes"], m["targets_json"], m["prompt"],
+            m["max_tokens"], m["temperature"], m["stream"], m["concurrency"],
+            m["iterations"], m["enabled"], m["next_run_at"], m["updated_at"],
+            schedule_id,
+        ),
+    )
+    return await get_schedule(schedule_id)
+
+
+async def delete_schedule(schedule_id: str) -> bool:
+    existing = await get_schedule(schedule_id)
+    if not existing:
+        return False
+    _run("DELETE FROM schedules WHERE id = ?", (schedule_id,))
+    return True
+
+
+async def set_schedule_enabled(schedule_id: str, enabled: bool) -> dict | None:
+    existing = await get_schedule(schedule_id)
+    if not existing:
+        return None
+    now = datetime.now(timezone.utc).isoformat()
+    if enabled:
+        # 暂停恢复：从此刻重新开始计时
+        next_run = _next_run_iso(now, existing["interval_minutes"])
+    else:
+        next_run = None
+    _run(
+        "UPDATE schedules SET enabled=?, next_run_at=?, updated_at=? WHERE id=?",
+        (int(enabled), next_run, now, schedule_id),
+    )
+    return await get_schedule(schedule_id)
+
+
+async def get_due_schedules() -> list[dict]:
+    """查询到期且启用的任务（executor 轮询用）。"""
+    now = datetime.now(timezone.utc).isoformat()
+    return _fetchall(
+        "SELECT * FROM schedules WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?",
+        (now,),
+    )
+
+
+async def update_schedule_run_status(schedule_id: str, status: str) -> None:
+    """status: success / partial / failed / running"""
+    now = datetime.now(timezone.utc).isoformat()
+    _run(
+        "UPDATE schedules SET last_run_status=?, last_run_at=? WHERE id=?",
+        (status, now, schedule_id),
+    )
+
+
+async def mark_schedule_stale_running() -> None:
+    """启动时把遗留的 running 状态重置（进程被杀时执行未收尾）。"""
+    _run("UPDATE schedules SET last_run_status='failed' WHERE last_run_status='running'")
+
+
+async def advance_schedule_next_run(schedule_id: str, interval_minutes: int) -> None:
+    """执行完成后推进下次执行时间（仅对 enabled 任务；暂停中不推进）。"""
+    now = datetime.now(timezone.utc).isoformat()
+    _run(
+        "UPDATE schedules SET next_run_at=?, updated_at=? WHERE id=? AND enabled=1",
+        (_next_run_iso(now, interval_minutes), now, schedule_id),
+    )
+
+
+def _next_run_iso(now_iso: str, interval_minutes: int) -> str:
+    from datetime import timedelta
+
+    dt = datetime.fromisoformat(now_iso)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (dt + timedelta(minutes=interval_minutes)).astimezone(timezone.utc).isoformat()
 

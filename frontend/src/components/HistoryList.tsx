@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { getHistory, deleteHistoryItem, clearHistory } from "@/lib/api";
+import { getHistory, deleteHistoryItem, clearHistory, getSchedules } from "@/lib/api";
 import type { TestHistory } from "@/types";
 import { History, Trash2, X, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 
@@ -12,13 +12,15 @@ interface Props {
 
 export default function HistoryList({ refreshKey }: Props) {
   const [tests, setTests] = useState<TestHistory[]>([]);
+  const [scheduleNames, setScheduleNames] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
 
   const fetchHistory = async () => {
     setLoading(true);
     try {
-      const data = await getHistory(100);
+      const [data, schedules] = await Promise.all([getHistory(100), getSchedules()]);
       setTests(data);
+      setScheduleNames(new Map(schedules.map((s) => [s.id, s.name || "定时"])));
     } catch {
       // ignore
     } finally {
@@ -82,6 +84,11 @@ export default function HistoryList({ refreshKey }: Props) {
                     <span className="text-sm truncate">
                       {t.model.split("/").pop()}
                     </span>
+                    {t.schedule_id && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
+                        {scheduleNames.get(t.schedule_id) || "定时"}
+                      </Badge>
+                    )}
                     <span className="text-xs text-muted-foreground">
                       {new Date(t.created_at).toLocaleTimeString()}
                     </span>

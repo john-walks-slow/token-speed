@@ -3,7 +3,6 @@ import { Badge } from "@/components/ui/badge";
 import type { SpeedTestResult, BatchSummary } from "@/types";
 import {
   Gauge,
-  Zap,
   Clock,
   CheckCircle2,
   XCircle,
@@ -64,18 +63,12 @@ export default function SpeedTestResults({ results, summary }: Props) {
           </Badge>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <MetricCard
             icon={<Gauge className="w-4 h-4" />}
             label="平均 TPS"
             value={summary.avg_tps}
             color="text-primary"
-          />
-          <MetricCard
-            icon={<Zap className="w-4 h-4" />}
-            label="平均 TPM"
-            value={summary.avg_tpm}
-            color="text-amber-400"
           />
           <MetricCard
             icon={<Clock className="w-4 h-4" />}
@@ -158,18 +151,12 @@ export default function SpeedTestResults({ results, summary }: Props) {
 
       {r.success ? (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <MetricCard
               icon={<Gauge className="w-4 h-4" />}
               label="TPS"
               value={r.tps}
               color="text-primary"
-            />
-            <MetricCard
-              icon={<Zap className="w-4 h-4" />}
-              label="TPM"
-              value={r.tpm}
-              color="text-amber-400"
             />
             <MetricCard
               icon={<Clock className="w-4 h-4" />}

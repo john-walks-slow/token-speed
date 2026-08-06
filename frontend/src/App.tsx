@@ -1,12 +1,14 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import ConnectionConfig from "@/components/ConnectionConfig";
 import ModelSelector from "@/components/ModelSelector";
 import SpeedTestForm from "@/components/SpeedTestForm";
+import SpeedTestProgress from "@/components/SpeedTestProgress";
 import SpeedTestResults from "@/components/SpeedTestResults";
 import HistoryList from "@/components/HistoryList";
 import StatsPanel from "@/components/StatsPanel";
-import { runBatchSpeedTest, getProviders } from "@/lib/api";
+import SchedulePanel from "@/components/SchedulePanel";
+import { streamBatchSpeedTest, getProviders } from "@/lib/api";
 import type { Provider, SpeedTestResult, BatchSummary, SpeedTestItem } from "@/types";
 import {
   Gauge,
@@ -16,6 +18,7 @@ import {
   PanelLeftOpen,
   PanelLeftClose,
   FlaskConical,
+  CalendarClock,
 } from "lucide-react";
 
 export default function App() {
@@ -24,6 +27,9 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<SpeedTestResult[]>([]);
   const [summary, setSummary] = useState<BatchSummary | undefined>();
+  const [progress, setProgress] = useState<{ completed: number; total: number; results: SpeedTestResult[] } | null>(null);
+  const [cancelled, setCancelled] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [tab, setTab] = useState("test");
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -97,48 +103,77 @@ export default function App() {
     }) => {
       const tests = Array.from(selectedTests.values());
       if (tests.length === 0) return;
+      const total = tests.length * params.iterations;
       setRunning(true);
+      setCancelled(false);
       setResults([]);
       setSummary(undefined);
+      setProgress({ completed: 0, total, results: [] });
+      const controller = new AbortController();
+      abortRef.current = controller;
       try {
-        const res = await runBatchSpeedTest({
-          tests,
-          prompt: params.prompt,
-          max_tokens: params.maxTokens,
-          temperature: params.temperature,
-          concurrency: params.concurrency,
-          iterations: params.iterations,
-          stream: params.stream,
-        });
-        setResults(res.results);
-        setSummary(res.summary);
-        setRefreshKey((k) => k + 1);
-        setTab("results");
-      } catch (e) {
-        setResults([
+        await streamBatchSpeedTest(
           {
-            id: "error",
-            base_url: "",
-            model: "error",
-            prompt: "",
-            max_tokens: 0,
-            temperature: 0,
-            ttft_ms: null,
-            total_latency_ms: 0,
-            tokens_generated: 0,
-            tps: 0,
-            tpm: 0,
-            success: false,
-            error_message: e instanceof Error ? e.message : "测试失败",
-            created_at: new Date().toISOString(),
+            tests,
+            prompt: params.prompt,
+            max_tokens: params.maxTokens,
+            temperature: params.temperature,
+            concurrency: params.concurrency,
+            iterations: params.iterations,
+            stream: params.stream,
           },
-        ]);
+          {
+            onProgress: (ev) => {
+              setProgress((prev) => ({
+                completed: ev.index,
+                total: ev.total,
+                results: [...(prev?.results ?? []), ev.result],
+              }));
+            },
+            onSummary: (ev) => {
+              setResults(ev.results);
+              setSummary(ev.summary);
+              setProgress(null);
+              setRefreshKey((k) => k + 1);
+              setTab("results");
+            },
+          },
+          controller.signal
+        );
+      } catch (e) {
+        if (controller.signal.aborted) {
+          // User cancelled — keep partial results shown in the progress panel
+          setCancelled(true);
+        } else {
+          setResults([
+            {
+              id: "error",
+              base_url: "",
+              model: "error",
+              prompt: "",
+              max_tokens: 0,
+              temperature: 0,
+              ttft_ms: null,
+              total_latency_ms: 0,
+              tokens_generated: 0,
+              tps: 0,
+              success: false,
+              error_message: e instanceof Error ? e.message : "测试失败",
+              created_at: new Date().toISOString(),
+            },
+          ]);
+          setProgress(null);
+        }
       } finally {
         setRunning(false);
       }
     },
     [selectedTests]
   );
+
+  const handleCancel = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
 
   return (
     <div className="min-h-screen bg-background">
@@ -186,7 +221,7 @@ export default function App() {
 
           <div className="p-4 lg:p-6">
             <Tabs value={tab} onValueChange={setTab}>
-              <TabsList className="w-full sm:w-auto grid grid-cols-3 sm:inline-flex">
+              <TabsList className="w-full sm:w-auto grid grid-cols-4 sm:inline-flex">
                 <TabsTrigger value="test">
                   <Gauge className="w-3.5 h-3.5 mr-1.5" />
                   测速
@@ -198,6 +233,10 @@ export default function App() {
                 <TabsTrigger value="stats">
                   <BarChart3 className="w-3.5 h-3.5 mr-1.5" />
                   统计
+                </TabsTrigger>
+                <TabsTrigger value="schedule">
+                  <CalendarClock className="w-3.5 h-3.5 mr-1.5" />
+                  定时
                 </TabsTrigger>
               </TabsList>
 
@@ -227,6 +266,15 @@ export default function App() {
                         running={running}
                       />
                     )}
+                    {progress && (
+                      <SpeedTestProgress
+                        completed={progress.completed}
+                        total={progress.total}
+                        results={progress.results}
+                        cancelled={cancelled}
+                        onCancel={handleCancel}
+                      />
+                    )}
                   </div>
                 )}
               </TabsContent>
@@ -240,6 +288,10 @@ export default function App() {
 
               <TabsContent value="stats">
                 <StatsPanel refreshKey={refreshKey} />
+              </TabsContent>
+
+              <TabsContent value="schedule">
+                <SchedulePanel providers={providers} />
               </TabsContent>
             </Tabs>
           </div>

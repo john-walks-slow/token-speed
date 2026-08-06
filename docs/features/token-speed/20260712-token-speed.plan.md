@@ -45,7 +45,7 @@
 1. **连接配置**：输入 Base URL、API Key，自动检测可用模型列表
 2. **模型选择**：从检测到的模型中选择一个或多个进行测速
 3. **测速参数**：配置测试 prompt、max tokens、temperature、并发数等
-4. **实时测速**：显示 TTFT、TPS、TPM、总耗时等指标
+4. **实时测速**：显示 TTFT、TPS、总耗时等指标
 5. **历史记录**：每次测试结果持久化存储
 6. **统计面板**：趋势图、对比分析、基础统计
 
@@ -55,7 +55,6 @@
 |------|------|
 | TTFT (Time to First Token) | 首 token 延迟 |
 | TPS (Tokens Per Second) | 每秒生成 token 数 |
-| TPM (Tokens Per Minute) | 每分钟 token 数 |
 | Latency | 总请求延迟 |
 | Success Rate | 成功率 |
 
@@ -110,7 +109,6 @@ CREATE TABLE speed_tests (
   total_latency_ms REAL,    -- total request duration (ms)
   tokens_generated INTEGER, -- tokens generated
   tps           REAL,       -- tokens per second
-  tpm           REAL,       -- tokens per minute
   success       BOOLEAN,
   error_message TEXT,
   created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP

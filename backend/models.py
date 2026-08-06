@@ -60,7 +60,6 @@ class SpeedTestResult(BaseModel):
     reasoning_tokens: int = 0
     content_tokens: int = 0
     tps: float
-    tpm: float
     success: bool
     error_message: Optional[str] = None
     created_at: str = ""
@@ -78,16 +77,15 @@ class SpeedTestHistory(BaseModel):
     reasoning_tokens: int = 0
     content_tokens: int = 0
     tps: float
-    tpm: float
     success: bool
     created_at: str
+    schedule_id: Optional[str] = None
 
 
 class StatsResponse(BaseModel):
     total_tests: int
     success_rate: float
     avg_tps: float
-    avg_tpm: float
     avg_latency_ms: float
     avg_ttft_ms: Optional[float]
     tests_by_model: list[dict]
@@ -127,4 +125,55 @@ class ProviderResponse(BaseModel):
 
 class ProviderListResponse(BaseModel):
     providers: list[ProviderResponse]
+
+
+# ── Schedule ───────────────────────────────────────────────────
+
+
+class ScheduleTarget(BaseModel):
+    provider_id: str
+    models: list[str]
+
+
+class ScheduleCreate(BaseModel):
+    name: str = ""
+    interval_minutes: int
+    targets: list[ScheduleTarget]
+    prompt: str = "Hello, tell me a short story in 3 sentences."
+    max_tokens: int = 128
+    temperature: float = 0.7
+    stream: bool = True
+    concurrency: int = 1
+    iterations: int = 1
+
+
+class ScheduleUpdate(BaseModel):
+    name: Optional[str] = None
+    interval_minutes: Optional[int] = None
+    targets: Optional[list[ScheduleTarget]] = None
+    prompt: Optional[str] = None
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
+    stream: Optional[bool] = None
+    concurrency: Optional[int] = None
+    iterations: Optional[int] = None
+
+
+class ScheduleResponse(BaseModel):
+    id: str
+    name: str = ""
+    enabled: bool = True
+    interval_minutes: int
+    targets: list[ScheduleTarget] = []
+    prompt: str = ""
+    max_tokens: int = 128
+    temperature: float = 0.7
+    stream: bool = True
+    concurrency: int = 1
+    iterations: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+    last_run_at: Optional[str] = None
+    next_run_at: Optional[str] = None
+    last_run_status: Optional[str] = None
 

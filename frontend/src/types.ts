@@ -24,7 +24,6 @@ export interface SpeedTestResult {
   reasoning_tokens: number;
   content_tokens: number;
   tps: number;
-  tpm: number;
   success: boolean;
   error_message: string | null;
   created_at: string;
@@ -35,7 +34,6 @@ export interface BatchSummary {
   successful: number;
   failed: number;
   avg_tps: number;
-  avg_tpm: number;
   avg_latency_ms: number;
   best_model: string;
   best_tps: number;
@@ -64,16 +62,15 @@ export interface TestHistory {
   reasoning_tokens: number;
   content_tokens: number;
   tps: number;
-  tpm: number;
   success: boolean;
   created_at: string;
+  schedule_id?: string | null;
 }
 
 export interface StatsResponse {
   total_tests: number;
   success_rate: number;
   avg_tps: number;
-  avg_tpm: number;
   avg_latency_ms: number;
   avg_ttft_ms: number | null;
   tests_by_model: {
@@ -100,4 +97,44 @@ export interface Provider {
 export interface ProviderListResponse {
   providers: Provider[];
 }
+
+// ── Schedule ──────────────────────────────────────────────────
+
+export interface ScheduleTarget {
+  provider_id: string;
+  models: string[];
+}
+
+export interface Schedule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  interval_minutes: number;
+  targets: ScheduleTarget[];
+  prompt: string;
+  max_tokens: number;
+  temperature: number;
+  stream: boolean;
+  concurrency: number;
+  iterations: number;
+  created_at: string;
+  updated_at: string;
+  last_run_at?: string | null;
+  next_run_at?: string | null;
+  last_run_status?: string | null;
+}
+
+export interface ScheduleCreate {
+  name: string;
+  interval_minutes: number;
+  targets: ScheduleTarget[];
+  prompt: string;
+  max_tokens: number;
+  temperature: number;
+  stream: boolean;
+  concurrency: number;
+  iterations: number;
+}
+
+export type ScheduleUpdate = Partial<ScheduleCreate>;
 

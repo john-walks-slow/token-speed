@@ -7,9 +7,6 @@ import type { TestHistory, StatsResponse } from "@/types";
 import {
   BarChart3,
   TrendingUp,
-  Gauge,
-  Zap,
-  Clock,
   Activity,
   Loader2,
   RotateCcw,
@@ -28,12 +25,11 @@ import {
   ReferenceLine,
 } from "recharts";
 
-type Metric = "tps" | "tpm" | "total_latency_ms" | "ttft_ms";
+type Metric = "tps" | "total_latency_ms" | "ttft_ms";
 type TimeRange = "1h" | "24h" | "7d" | "30d" | "all";
 
 const METRIC_LABELS: Record<Metric, string> = {
   tps: "TPS",
-  tpm: "TPM",
   total_latency_ms: "延迟(ms)",
   ttft_ms: "TTFT(ms)",
 };
@@ -149,7 +145,6 @@ export default function StatsPanel({ refreshKey }: Props) {
       total,
       successRate: total > 0 ? Math.round((success.length / total) * 100) : 0,
       avgTps: success.length > 0 ? success.reduce((s, t) => s + t.tps, 0) / success.length : 0,
-      avgTpm: success.length > 0 ? success.reduce((s, t) => s + t.tpm, 0) / success.length : 0,
       avgLatency: success.length > 0 ? success.reduce((s, t) => s + t.total_latency_ms, 0) / success.length : 0,
     };
   }, [filteredTests]);
@@ -307,11 +302,10 @@ export default function StatsPanel({ refreshKey }: Props) {
 
       {/* ── Aggregate Cards ── */}
       {cardStats && (
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <MetricCard label="测试次数" value={cardStats.total} />
           <MetricCard label="成功率" value={`${cardStats.successRate}%`} />
           <MetricCard label="平均 TPS" value={Math.round(cardStats.avgTps * 100) / 100} />
-          <MetricCard label="平均 TPM" value={Math.round(cardStats.avgTpm * 100) / 100} />
           <MetricCard label="平均延迟" value={`${Math.round(cardStats.avgLatency)}ms`} />
         </div>
       )}

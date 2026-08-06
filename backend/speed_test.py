@@ -1,8 +1,11 @@
+import asyncio
 import time
 import uuid
 from datetime import datetime, timezone
 
 import httpx
+
+from .database import insert_speed_test
 
 
 async def list_models(base_url: str, api_key: str = "") -> tuple[bool, list[dict] | str]:
@@ -138,7 +141,6 @@ async def run_speed_test(
             content_ttft_ms = None
 
         tps = (tokens_generated / (total_latency_ms / 1000)) if total_latency_ms > 0 and tokens_generated > 0 else 0
-        tpm = tps * 60
 
         return {
             "id": test_id,
@@ -155,7 +157,6 @@ async def run_speed_test(
             "reasoning_tokens": reasoning_tokens,
             "content_tokens": content_tokens,
             "tps": round(tps, 2),
-            "tpm": round(tpm, 2),
             "success": True,
             "error_message": None,
             "created_at": created_at,
@@ -177,9 +178,72 @@ async def run_speed_test(
             "reasoning_tokens": 0,
             "content_tokens": 0,
             "tps": 0,
-            "tpm": 0,
             "success": False,
             "error_message": str(e),
             "created_at": created_at,
         }
+
+
+async def execute_batch_tests(
+    tests: list[dict],
+    prompt: str,
+    max_tokens: int,
+    temperature: float,
+    stream: bool,
+    concurrency: int,
+    iterations: int,
+    schedule_id: str | None = None,
+) -> list[dict]:
+    """批量执行测速并入库。batch 端点与定时调度器共用。
+
+    返回每个测试的结果 dict（异常以失败结果兜底）。schedule_id 非空时标记到历史。
+    """
+    all_tasks = []
+    for test in tests:
+        for _ in range(iterations):
+            all_tasks.append(
+                run_speed_test(
+                    base_url=test["base_url"],
+                    api_key=test.get("api_key", ""),
+                    model=test["model"],
+                    prompt=prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    stream=stream,
+                )
+            )
+
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def run_with_semaphore(task):
+        async with semaphore:
+            return await task
+
+    results = await asyncio.gather(*[run_with_semaphore(t) for t in all_tasks], return_exceptions=True)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    results = [r if not isinstance(r, Exception) else {
+        "id": str(uuid.uuid4()),
+        "base_url": "",
+        "model": "error",
+        "actual_model": "error",
+        "content_ttft_ms": None,
+        "reasoning_tokens": 0,
+        "content_tokens": 0,
+        "prompt": prompt,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "ttft_ms": None,
+        "total_latency_ms": 0,
+        "tokens_generated": 0,
+        "tps": 0,
+        "tpm": 0,
+        "success": False,
+        "error_message": str(r),
+        "created_at": now_iso,
+    } for r in results]
+
+    for r in results:
+        await insert_speed_test(r, schedule_id)
+
+    return results
 

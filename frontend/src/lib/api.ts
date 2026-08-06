@@ -6,6 +6,9 @@ import type {
   StatsResponse,
   ProviderListResponse,
   Provider,
+  Schedule,
+  ScheduleCreate,
+  ScheduleUpdate,
 } from "../types";
 
 const BASE = "/api";
@@ -60,6 +63,79 @@ export async function runBatchSpeedTest(params: {
     method: "POST",
     body: JSON.stringify(params),
   });
+}
+
+export interface SpeedTestProgressEvent {
+  index: number;
+  total: number;
+  result: SpeedTestResult;
+}
+
+export interface StreamHandlers {
+  onProgress?: (event: SpeedTestProgressEvent) => void;
+  onSummary?: (event: { results: SpeedTestResult[]; summary: BatchSummary }) => void;
+}
+
+/**
+ * Streams batch speed test results over SSE. Each completed test fires
+ * onProgress; the final summary fires onSummary. Rejects on transport error
+ * (abort signal included).
+ */
+export async function streamBatchSpeedTest(
+  params: {
+    tests: { model: string; base_url: string; api_key: string }[];
+    prompt: string;
+    max_tokens: number;
+    temperature: number;
+    concurrency: number;
+    iterations: number;
+    stream: boolean;
+  },
+  handlers: StreamHandlers,
+  signal?: AbortSignal
+): Promise<void> {
+  const res = await fetch(`${BASE}/speed-test/batch-stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    body: JSON.stringify(params),
+    signal,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API error (${res.status}): ${text}`);
+  }
+  if (!res.body) throw new Error("Response body missing");
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const dispatch = (event: string, data: string) => {
+    if (event === "progress") {
+      handlers.onProgress?.(JSON.parse(data) as SpeedTestProgressEvent);
+    } else if (event === "summary") {
+      handlers.onSummary?.(JSON.parse(data) as { results: SpeedTestResult[]; summary: BatchSummary });
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let sep: number;
+    while ((sep = buffer.indexOf("\n\n")) !== -1) {
+      const block = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      let event = "message";
+      let data = "";
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) data = line.slice(5).trim();
+      }
+      if (data) dispatch(event, data);
+    }
+  }
 }
 
 export async function getHistory(
@@ -127,4 +203,46 @@ export async function updateProviderModels(
     method: "PUT",
     body: JSON.stringify({ models }),
   });
+}
+
+// ── Schedule API ───────────────────────────────────────────────
+
+export async function getSchedules(): Promise<Schedule[]> {
+  return request("/schedules");
+}
+
+export async function createSchedule(
+  data: ScheduleCreate
+): Promise<Schedule> {
+  return request("/schedules", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateSchedule(
+  id: string,
+  data: ScheduleUpdate
+): Promise<Schedule> {
+  return request(`/schedules/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteSchedule(id: string): Promise<void> {
+  await request(`/schedules/${id}`, { method: "DELETE" });
+}
+
+export async function toggleSchedule(
+  id: string,
+  enabled: boolean
+): Promise<Schedule> {
+  return request(`/schedules/${id}/toggle?enabled=${enabled}`, {
+    method: "PUT",
+  });
+}
+
+export async function runScheduleNow(id: string): Promise<Schedule> {
+  return request(`/schedules/${id}/run`, { method: "POST" });
 }
