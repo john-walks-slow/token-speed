@@ -2,6 +2,7 @@ import type {
   ConnectResponse,
   SpeedTestResult,
   BatchResponse,
+  BatchSummary,
   TestHistory,
   StatsResponse,
   ProviderListResponse,
@@ -58,6 +59,8 @@ export async function runBatchSpeedTest(params: {
   concurrency: number;
   iterations: number;
   stream: boolean;
+  disable_reasoning?: boolean;
+  max_rpm?: number;
 }): Promise<BatchResponse> {
   return request("/speed-test/batch", {
     method: "POST",
@@ -90,6 +93,8 @@ export async function streamBatchSpeedTest(
     concurrency: number;
     iterations: number;
     stream: boolean;
+    disable_reasoning?: boolean;
+    max_rpm?: number;
   },
   handlers: StreamHandlers,
   signal?: AbortSignal

@@ -16,7 +16,7 @@
   --color-accent: oklch(0.269 0 0);
   --color-accent-foreground: oklch(0.985 0 0);
   --color-destructive: oklch(0.577 0.245 27.325);
-  --color-destructive-foreground: oklch(0.577 0.245 27.325);
+  --color-destructive-foreground: oklch(0.985 0 0);
   --color-border: oklch(0.269 0 0);
   --color-input: oklch(0.269 0 0);
   --color-ring: oklch(0.922 0.176 149.238);
@@ -30,4 +30,16 @@
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
+}
+
+/* 图表 tooltip：recharts 默认文本色在暗色主题下不可见，统一覆盖为前景色 */
+.recharts-default-tooltip,
+.recharts-tooltip-wrapper {
+  color: var(--color-foreground);
+}
+.recharts-tooltip-wrapper * {
+  color: var(--color-foreground);
+}
+.recharts-tooltip-cursor {
+  fill: oklch(0.269 0 0 / 0.25);
 }

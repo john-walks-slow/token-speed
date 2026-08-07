@@ -58,30 +58,52 @@ export default function App() {
     });
   }, []);
 
+  const providerById = useCallback(
+    (id: string) => providers.find((p) => p.id === id),
+    [providers]
+  );
+
   const toggleTestItem = useCallback(
-    (providerId: string, model: string, baseUrl: string, apiKey: string) => {
-      const key = `${providerId}|${model}`;
+    (key: string) => {
+      const [providerId, ...rest] = key.split("|");
+      const model = rest.join("|");
       setSelectedTests((prev) => {
         const next = new Map(prev);
         if (next.has(key)) {
           next.delete(key);
         } else {
-          next.set(key, { model, base_url: baseUrl, api_key: apiKey });
+          const p = providerById(providerId);
+          if (!p) return prev;
+          next.set(key, {
+            model,
+            base_url: p.base_url,
+            api_key: p.api_key,
+            provider_id: p.id,
+            provider_name: p.name,
+          });
         }
         return next;
       });
     },
-    []
+    [providerById]
   );
 
   const toggleAllForProvider = useCallback(
-    (providerId: string, models: string[], baseUrl: string, apiKey: string, select: boolean) => {
+    (providerId: string, models: string[], select: boolean) => {
+      const p = providerById(providerId);
+      if (!p) return;
       setSelectedTests((prev) => {
         const next = new Map(prev);
         for (const m of models) {
           const key = `${providerId}|${m}`;
           if (select) {
-            next.set(key, { model: m, base_url: baseUrl, api_key: apiKey });
+            next.set(key, {
+              model: m,
+              base_url: p.base_url,
+              api_key: p.api_key,
+              provider_id: p.id,
+              provider_name: p.name,
+            });
           } else {
             next.delete(key);
           }
@@ -89,7 +111,7 @@ export default function App() {
         return next;
       });
     },
-    []
+    [providerById]
   );
 
   const handleRunTest = useCallback(
@@ -100,6 +122,8 @@ export default function App() {
       concurrency: number;
       iterations: number;
       stream: boolean;
+      disableReasoning: boolean;
+      maxRpm: number;
     }) => {
       const tests = Array.from(selectedTests.values());
       if (tests.length === 0) return;
@@ -121,6 +145,8 @@ export default function App() {
             concurrency: params.concurrency,
             iterations: params.iterations,
             stream: params.stream,
+            disable_reasoning: params.disableReasoning,
+            max_rpm: params.maxRpm,
           },
           {
             onProgress: (ev) => {
@@ -150,12 +176,19 @@ export default function App() {
               id: "error",
               base_url: "",
               model: "error",
+              actual_model: "error",
+              provider_id: null,
+              provider_name: null,
+              response_content: null,
               prompt: "",
               max_tokens: 0,
               temperature: 0,
               ttft_ms: null,
+              content_ttft_ms: null,
               total_latency_ms: 0,
               tokens_generated: 0,
+              reasoning_tokens: 0,
+              content_tokens: 0,
               tps: 0,
               success: false,
               error_message: e instanceof Error ? e.message : "测试失败",
@@ -249,8 +282,8 @@ export default function App() {
                 ) : (
                   <div className="space-y-6">
                     <ModelSelector
-                      providers={providers}
-                      selected={selectedTests}
+                      groups={providers}
+                      selectedKeys={new Set(selectedTests.keys())}
                       onToggle={toggleTestItem}
                       onToggleAll={toggleAllForProvider}
                     />
@@ -273,6 +306,7 @@ export default function App() {
                         results={progress.results}
                         cancelled={cancelled}
                         onCancel={handleCancel}
+                        providers={providers}
                       />
                     )}
                   </div>
@@ -281,13 +315,13 @@ export default function App() {
 
               <TabsContent value="results">
                 <div className="space-y-6">
-                  <SpeedTestResults results={results} summary={summary} />
-                  <HistoryList refreshKey={refreshKey} />
+                  <SpeedTestResults results={results} summary={summary} providers={providers} />
+                  <HistoryList refreshKey={refreshKey} providers={providers} />
                 </div>
               </TabsContent>
 
               <TabsContent value="stats">
-                <StatsPanel refreshKey={refreshKey} />
+                <StatsPanel refreshKey={refreshKey} providers={providers} />
               </TabsContent>
 
               <TabsContent value="schedule">

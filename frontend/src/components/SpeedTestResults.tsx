@@ -1,6 +1,8 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import type { SpeedTestResult, BatchSummary } from "@/types";
+import type { Provider, SpeedTestResult, BatchSummary } from "@/types";
+import { modelDisplayLabel } from "@/lib/modelLabel";
+import ResponseContentView from "@/components/ResponseContentView";
 import {
   Gauge,
   Clock,
@@ -14,6 +16,7 @@ import {
 interface Props {
   results: SpeedTestResult[];
   summary?: BatchSummary;
+  providers: Provider[];
 }
 
 function MetricCard({
@@ -47,10 +50,11 @@ function MetricCard({
   );
 }
 
-export default function SpeedTestResults({ results, summary }: Props) {
+export default function SpeedTestResults({ results, summary, providers }: Props) {
   if (results.length === 0) return null;
 
   const successResults = results.filter((r) => r.success);
+  const bestResult = successResults.find((r) => r.model === summary?.best_model);
 
   if (summary) {
     return (
@@ -80,7 +84,7 @@ export default function SpeedTestResults({ results, summary }: Props) {
           <MetricCard
             icon={<Trophy className="w-4 h-4" />}
             label="最佳模型"
-            value={summary.best_model.split("/").pop() || summary.best_model}
+            value={bestResult ? modelDisplayLabel(providers, bestResult) : summary.best_model}
             unit={`${summary.best_tps} TPS`}
             color="text-emerald-400"
           />
@@ -96,7 +100,7 @@ export default function SpeedTestResults({ results, summary }: Props) {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="text-sm font-medium truncate">
-                        {r.model.split("/").pop()}
+                        {modelDisplayLabel(providers, r)}
                       </span>
                       {r.actual_model && r.actual_model !== r.model && (
                         <Badge variant="outline" className="text-[10px] px-1.5 text-amber-400 border-amber-400/30">
@@ -108,6 +112,7 @@ export default function SpeedTestResults({ results, summary }: Props) {
                       </Badge>
                     </div>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
+                      <ResponseContentView content={r.response_content} />
                       <span>延迟 {r.total_latency_ms}ms</span>
                       <span>
                         TTFT {r.ttft_ms !== null ? `${r.ttft_ms}ms` : "N/A"}
@@ -140,7 +145,7 @@ export default function SpeedTestResults({ results, summary }: Props) {
           <XCircle className="w-4 h-4 text-destructive" />
         )}
         <span className="text-sm font-medium">
-          {r.model.split("/").pop()} — {r.success ? "成功" : "失败"}
+          {modelDisplayLabel(providers, r)} — {r.success ? "成功" : "失败"}
         </span>
         {r.success && r.actual_model && r.actual_model !== r.model && (
           <Badge variant="outline" className="text-[10px] px-1.5 text-amber-400 border-amber-400/30">

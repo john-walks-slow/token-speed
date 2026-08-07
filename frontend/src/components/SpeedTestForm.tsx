@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2, Play } from "lucide-react";
-import TestParamsFields, { DEFAULT_PARAMS, type TestParamsValues } from "@/components/TestParamsFields";
+import TestParamsFields, { loadSavedParams, type TestParamsValues } from "@/components/TestParamsFields";
 
 interface Props {
   selectedCount: number;
@@ -11,7 +11,8 @@ interface Props {
 }
 
 export default function SpeedTestForm({ selectedCount, providerCount, onRunTest, running }: Props) {
-  const [params, setParams] = useState<TestParamsValues>(DEFAULT_PARAMS);
+  // 记忆上次测试配置：挂载时从 localStorage 恢复
+  const [params, setParams] = useState<TestParamsValues>(loadSavedParams);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

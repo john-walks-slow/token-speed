@@ -37,6 +37,7 @@ from .models import (
 )
 from .scheduler import SpeedTestScheduler
 from .speed_test import list_models, run_speed_test
+from .rate_limit import limiter
 
 
 scheduler = SpeedTestScheduler()
@@ -78,6 +79,7 @@ async def speed_test(req: SpeedTestRequest):
         max_tokens=req.max_tokens,
         temperature=req.temperature,
         stream=req.stream,
+        disable_reasoning=req.disable_reasoning,
     )
     await insert_speed_test(result)
     return SpeedTestResult(**result)
@@ -120,6 +122,9 @@ def _to_error_result(item: BatchSpeedTestItem, req: BatchSpeedTestRequest, error
         "base_url": item.base_url,
         "model": item.model,
         "actual_model": "error",
+        "provider_id": item.provider_id,
+        "provider_name": item.provider_name,
+        "response_content": None,
         "content_ttft_ms": None,
         "reasoning_tokens": 0,
         "content_tokens": 0,
@@ -167,7 +172,9 @@ async def _iter_batch_results(req: BatchSpeedTestRequest):
         semaphores.setdefault(key, asyncio.Semaphore(req.concurrency))
 
     async def run_one(item):
-        sem = semaphores[(item.base_url, item.api_key)]
+        key = (item.base_url, item.api_key)
+        sem = semaphores[key]
+        await limiter.acquire(key, req.max_rpm)
         async with sem:
             try:
                 return await run_speed_test(
@@ -178,6 +185,9 @@ async def _iter_batch_results(req: BatchSpeedTestRequest):
                     max_tokens=req.max_tokens,
                     temperature=req.temperature,
                     stream=req.stream,
+                    disable_reasoning=req.disable_reasoning,
+                    provider_id=item.provider_id,
+                    provider_name=item.provider_name,
                 )
             except Exception as e:
                 return _to_error_result(item, req, e, now_iso)
@@ -319,6 +329,8 @@ def _schedule_response(s: dict) -> ScheduleResponse:
         stream=bool(s.get("stream")),
         concurrency=s.get("concurrency") or 1,
         iterations=s.get("iterations") or 1,
+        disable_reasoning=bool(s.get("disable_reasoning")),
+        max_rpm=s.get("max_rpm") if s.get("max_rpm") is not None else -1,
         created_at=s.get("created_at") or "",
         updated_at=s.get("updated_at") or "",
         last_run_at=s.get("last_run_at"),
@@ -345,6 +357,8 @@ async def add_schedule(req: ScheduleCreate):
         stream=req.stream,
         concurrency=req.concurrency,
         iterations=req.iterations,
+        disable_reasoning=req.disable_reasoning,
+        max_rpm=req.max_rpm,
     )
     return _schedule_response(s)
 

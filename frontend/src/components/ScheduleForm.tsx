@@ -36,7 +36,13 @@ function buildMapFromTargets(
         stale.push({ provider_id: t.provider_id, models: [m] });
         continue;
       }
-      map.set(`${p.id}|${m}`, { model: m, base_url: p.base_url, api_key: p.api_key });
+      map.set(`${p.id}|${m}`, {
+        model: m,
+        base_url: p.base_url,
+        api_key: p.api_key,
+        provider_id: p.id,
+        provider_name: p.name,
+      });
     }
   }
   return { map, stale };
@@ -72,6 +78,8 @@ export default function ScheduleForm({ providers, editing, onSaved, onCancel }: 
         concurrency: editing.concurrency,
         iterations: editing.iterations,
         stream: editing.stream,
+        disableReasoning: editing.disable_reasoning,
+        maxRpm: editing.max_rpm,
       });
       const { map, stale } = buildMapFromTargets(editing.targets, providers);
       setSelected(map);
@@ -90,31 +98,54 @@ export default function ScheduleForm({ providers, editing, onSaved, onCancel }: 
   }, [editing, providers]);
 
   const toggleItem = useCallback(
-    (providerId: string, model: string, baseUrl: string, apiKey: string) => {
-      const key = `${providerId}|${model}`;
+    (key: string) => {
+      const [providerId, ...rest] = key.split("|");
+      const model = rest.join("|");
       setSelected((prev) => {
         const next = new Map(prev);
-        if (next.has(key)) next.delete(key);
-        else next.set(key, { model, base_url: baseUrl, api_key: apiKey });
-        return next;
-      });
-    },
-    []
-  );
-
-  const toggleAllForProvider = useCallback(
-    (providerId: string, models: string[], baseUrl: string, apiKey: string, select: boolean) => {
-      setSelected((prev) => {
-        const next = new Map(prev);
-        for (const m of models) {
-          const key = `${providerId}|${m}`;
-          if (select) next.set(key, { model: m, base_url: baseUrl, api_key: apiKey });
-          else next.delete(key);
+        if (next.has(key)) {
+          next.delete(key);
+        } else {
+          const p = providers.find((x) => x.id === providerId);
+          if (!p) return prev;
+          next.set(key, {
+            model,
+            base_url: p.base_url,
+            api_key: p.api_key,
+            provider_id: p.id,
+            provider_name: p.name,
+          });
         }
         return next;
       });
     },
-    []
+    [providers]
+  );
+
+  const toggleAllForProvider = useCallback(
+    (providerId: string, models: string[], select: boolean) => {
+      const p = providers.find((x) => x.id === providerId);
+      if (!p) return;
+      setSelected((prev) => {
+        const next = new Map(prev);
+        for (const m of models) {
+          const key = `${providerId}|${m}`;
+          if (select) {
+            next.set(key, {
+              model: m,
+              base_url: p.base_url,
+              api_key: p.api_key,
+              provider_id: p.id,
+              provider_name: p.name,
+            });
+          } else {
+            next.delete(key);
+          }
+        }
+        return next;
+      });
+    },
+    [providers]
   );
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -141,6 +172,8 @@ export default function ScheduleForm({ providers, editing, onSaved, onCancel }: 
         stream: params.stream,
         concurrency: params.concurrency,
         iterations: params.iterations,
+        disable_reasoning: params.disableReasoning,
+        max_rpm: params.maxRpm,
       };
       if (editing) await updateSchedule(editing.id, payload);
       else await createSchedule(payload);
@@ -196,10 +229,11 @@ export default function ScheduleForm({ providers, editing, onSaved, onCancel }: 
           </div>
 
           <ModelSelector
-            providers={providers}
-            selected={selected}
+            groups={providers}
+            selectedKeys={new Set(selected.keys())}
             onToggle={toggleItem}
             onToggleAll={toggleAllForProvider}
+            title="选择定时测速模型"
           />
 
           {staleWarning && (
@@ -209,7 +243,7 @@ export default function ScheduleForm({ providers, editing, onSaved, onCancel }: 
             </p>
           )}
 
-          <TestParamsFields values={params} onChange={setParams} />
+          <TestParamsFields values={params} onChange={setParams} persist={false} />
 
           {error && <p className="text-xs text-destructive">{error}</p>}
 

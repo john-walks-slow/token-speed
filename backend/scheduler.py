@@ -99,7 +99,13 @@ class SpeedTestScheduler:
                 if not prov:
                     continue  # provider 已删除，跳过该 target
                 for m in t["models"]:
-                    tests.append({"model": m, "base_url": prov["base_url"], "api_key": prov["api_key"]})
+                    tests.append({
+                        "model": m,
+                        "base_url": prov["base_url"],
+                        "api_key": prov["api_key"],
+                        "provider_id": prov["id"],
+                        "provider_name": prov["name"],
+                    })
 
             if not tests:
                 # 全部 target 失效
@@ -115,6 +121,8 @@ class SpeedTestScheduler:
                 concurrency=sched["concurrency"] or 1,
                 iterations=sched["iterations"] or 1,
                 schedule_id=schedule_id,
+                disable_reasoning=bool(sched["disable_reasoning"]),
+                max_rpm=sched["max_rpm"] if sched["max_rpm"] is not None else -1,
             )
             ok = sum(1 for r in results if r["success"])
             if ok == len(results):

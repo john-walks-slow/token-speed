@@ -27,12 +27,15 @@ class SpeedTestRequest(BaseModel):
     max_tokens: int = 256
     temperature: float = 0.7
     stream: bool = False
+    disable_reasoning: bool = False
 
 
 class BatchSpeedTestItem(BaseModel):
     model: str
     base_url: str
     api_key: str = ""
+    provider_id: str = ""
+    provider_name: str = ""
 
 
 class BatchSpeedTestRequest(BaseModel):
@@ -43,6 +46,8 @@ class BatchSpeedTestRequest(BaseModel):
     concurrency: int = 1
     iterations: int = 1
     stream: bool = False
+    disable_reasoning: bool = False
+    max_rpm: int = -1
 
 
 class SpeedTestResult(BaseModel):
@@ -50,6 +55,9 @@ class SpeedTestResult(BaseModel):
     base_url: str
     model: str
     actual_model: str = ""
+    provider_id: Optional[str] = None
+    provider_name: Optional[str] = None
+    response_content: Optional[str] = None
     prompt: str
     max_tokens: int
     temperature: float
@@ -70,6 +78,9 @@ class SpeedTestHistory(BaseModel):
     base_url: str
     model: str
     actual_model: str = ""
+    provider_id: Optional[str] = None
+    provider_name: Optional[str] = None
+    response_content: Optional[str] = None
     ttft_ms: Optional[float]
     content_ttft_ms: Optional[float] = None
     total_latency_ms: float
@@ -145,6 +156,8 @@ class ScheduleCreate(BaseModel):
     stream: bool = True
     concurrency: int = 1
     iterations: int = 1
+    disable_reasoning: bool = False
+    max_rpm: int = -1
 
 
 class ScheduleUpdate(BaseModel):
@@ -157,6 +170,8 @@ class ScheduleUpdate(BaseModel):
     stream: Optional[bool] = None
     concurrency: Optional[int] = None
     iterations: Optional[int] = None
+    disable_reasoning: Optional[bool] = None
+    max_rpm: Optional[int] = None
 
 
 class ScheduleResponse(BaseModel):
@@ -171,6 +186,8 @@ class ScheduleResponse(BaseModel):
     stream: bool = True
     concurrency: int = 1
     iterations: int = 1
+    disable_reasoning: bool = False
+    max_rpm: int = -1
     created_at: str = ""
     updated_at: str = ""
     last_run_at: Optional[str] = None

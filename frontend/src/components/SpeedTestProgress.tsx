@@ -2,7 +2,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { XCircle } from "lucide-react";
-import type { SpeedTestResult } from "@/types";
+import type { Provider, SpeedTestResult } from "@/types";
+import { modelDisplayLabel } from "@/lib/modelLabel";
+import ResponseContentView from "@/components/ResponseContentView";
 
 interface Props {
   completed: number;
@@ -10,9 +12,10 @@ interface Props {
   results: SpeedTestResult[];
   cancelled: boolean;
   onCancel: () => void;
+  providers: Provider[];
 }
 
-export default function SpeedTestProgress({ completed, total, results, cancelled, onCancel }: Props) {
+export default function SpeedTestProgress({ completed, total, results, cancelled, onCancel, providers }: Props) {
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
   return (
@@ -60,7 +63,7 @@ export default function SpeedTestProgress({ completed, total, results, cancelled
                 className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-md bg-card/60 text-sm"
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="truncate font-medium">{r.model.split("/").pop()}</span>
+                  <span className="truncate font-medium">{modelDisplayLabel(providers, r)}</span>
                   <Badge
                     variant={r.success ? "success" : "destructive"}
                     className="text-[10px] px-1.5"
@@ -69,6 +72,7 @@ export default function SpeedTestProgress({ completed, total, results, cancelled
                   </Badge>
                 </div>
                 <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0 tabular-nums">
+                  <ResponseContentView content={r.response_content} />
                   {r.success ? (
                     <>
                       <span>{r.tps} TPS</span>

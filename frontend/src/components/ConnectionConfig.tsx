@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -44,6 +45,10 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
   const [manageInput, setManageInput] = useState("");
   const [detecting, setDetecting] = useState(false);
 
+  // Delete confirmation dialog
+  const [pendingDelete, setPendingDelete] = useState<Provider | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   // Mobile collapsible
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -57,6 +62,19 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
     refresh();
   }, []);
 
+  /** 合并检测结果，保留已有模型的添加顺序，仅追加新检测到的模型。 */
+  const mergeDetectedModels = useCallback((existing: string[], detected: string[]) => {
+    const seen = new Set(existing);
+    const merged = [...existing];
+    for (const m of detected) {
+      if (!seen.has(m)) {
+        seen.add(m);
+        merged.push(m);
+      }
+    }
+    return merged;
+  }, []);
+
   const handleDetectModels = useCallback(
     async (p: Provider) => {
       setDetecting(true);
@@ -64,7 +82,8 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
         const res = await connect(p.base_url, p.api_key);
         const modelIds = res.success ? res.models.map((m) => m.id) : [];
         if (modelIds.length > 0) {
-          const updated = await updateProviderModels(p.id, modelIds);
+          const merged = mergeDetectedModels(p.models || [], modelIds);
+          const updated = await updateProviderModels(p.id, merged);
           if (updated && managingProvider?.id === p.id) {
             setManagingProvider(updated);
           }
@@ -76,7 +95,7 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
         setDetecting(false);
       }
     },
-    [refresh, managingProvider]
+    [refresh, managingProvider, mergeDetectedModels]
   );
 
   const handleSaveProvider = async () => {
@@ -118,9 +137,16 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
     setShowForm(true);
   };
 
-  const handleDeleteProvider = async (id: string) => {
-    await deleteProvider(id);
-    await refresh();
+  const handleDeleteProvider = async () => {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    try {
+      await deleteProvider(pendingDelete.id);
+      setPendingDelete(null);
+      await refresh();
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const handleAddModel = async () => {
@@ -252,7 +278,7 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
                     </button>
                     <button
                       title="删除"
-                      onClick={() => handleDeleteProvider(p.id)}
+                      onClick={() => setPendingDelete(p)}
                       className="text-muted-foreground hover:text-destructive p-0.5 cursor-pointer"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -318,56 +344,86 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
         </Card>
       </div>
 
-      {/* Model management dialog */}
-      {managingProvider && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setManagingProvider(null)}>
-          <Card className="w-full max-w-md border-border bg-background" onClick={(e) => e.stopPropagation()}>
-            <CardContent className="p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">{managingProvider.name} — 模型管理</span>
-                <button onClick={() => setManagingProvider(null)} className="text-muted-foreground hover:text-foreground cursor-pointer">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+      {/* Model management dialog — portal 到 body，避免被侧边栏的 sticky/overflow 层叠上下文盖住 */}
+      {managingProvider &&
+        createPortal(
+          <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4" onClick={() => setManagingProvider(null)}>
+            <Card className="w-full max-w-md border-border bg-background" onClick={(e) => e.stopPropagation()}>
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">{managingProvider.name} — 模型管理</span>
+                  <button onClick={() => setManagingProvider(null)} className="text-muted-foreground hover:text-foreground cursor-pointer">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
 
-              {/* Detect button */}
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full"
-                onClick={() => handleDetectModels(managingProvider)}
-                disabled={detecting}
-              >
-                {detecting ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
-                ) : (
-                  <RotateCcw className="w-3.5 h-3.5 mr-1" />
-                )}
-                检测模型
-              </Button>
+                {/* Detect button */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => handleDetectModels(managingProvider)}
+                  disabled={detecting}
+                >
+                  {detecting ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
+                  ) : (
+                    <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                  )}
+                  检测模型
+                </Button>
 
-              <div className="flex gap-2">
-                <Input placeholder="输入模型名称" value={manageInput} onChange={(e) => setManageInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddModel()} />
-                <Button size="sm" onClick={handleAddModel} disabled={!manageInput.trim()}>添加</Button>
-              </div>
-              <div className="max-h-48 overflow-y-auto space-y-1">
-                {(managingProvider.models || []).length === 0 ? (
-                  <p className="text-xs text-muted-foreground py-2">暂无模型，点击上方"检测模型"自动检测或手动添加</p>
-                ) : (
-                  (managingProvider.models || []).map((m) => (
-                    <div key={m} className="flex items-center justify-between py-1 px-2 rounded hover:bg-muted/50">
-                      <span className="text-xs">{m}</span>
-                      <button onClick={() => handleRemoveModel(m)} className="text-muted-foreground hover:text-destructive cursor-pointer">
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+                <div className="flex gap-2">
+                  <Input placeholder="输入模型名称" value={manageInput} onChange={(e) => setManageInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddModel()} />
+                  <Button size="sm" onClick={handleAddModel} disabled={!manageInput.trim()}>添加</Button>
+                </div>
+                <div className="max-h-48 overflow-y-auto space-y-1">
+                  {(managingProvider.models || []).length === 0 ? (
+                    <p className="text-xs text-muted-foreground py-2">暂无模型，点击上方"检测模型"自动检测或手动添加</p>
+                  ) : (
+                    (managingProvider.models || []).map((m) => (
+                      <div key={m} className="flex items-center justify-between py-1 px-2 rounded hover:bg-muted/50">
+                        <span className="text-xs">{m}</span>
+                        <button onClick={() => handleRemoveModel(m)} className="text-muted-foreground hover:text-destructive cursor-pointer">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>,
+          document.body
+        )}
+
+      {/* Delete confirmation dialog */}
+      {pendingDelete &&
+        createPortal(
+          <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4" onClick={() => setPendingDelete(null)}>
+            <Card className="w-full max-w-sm border-border bg-background" onClick={(e) => e.stopPropagation()}>
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Trash2 className="w-4 h-4 text-destructive" />
+                  <span className="text-sm font-medium">删除服务商</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  确定要删除「{pendingDelete.name}」吗？其下模型与测速历史将不再关联，该操作不可撤销。
+                </p>
+                <div className="flex justify-end gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setPendingDelete(null)}>
+                    取消
+                  </Button>
+                  <Button variant="destructive" size="sm" onClick={handleDeleteProvider} disabled={deleting}>
+                    {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                    删除
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>,
+          document.body
+        )}
     </>
   );
 }

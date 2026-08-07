@@ -6,11 +6,15 @@ from datetime import datetime, timezone
 import httpx
 
 from .database import insert_speed_test
+from .rate_limit import limiter
 
 
 async def list_models(base_url: str, api_key: str = "") -> tuple[bool, list[dict] | str]:
-    """Fetch available models from an OpenAI-compatible API endpoint."""
-    url = f"{base_url.rstrip('/')}/v1/models"
+    """Fetch available models from an OpenAI-compatible API endpoint.
+
+    base_url 需自带路径（含 /v1 等），不再自动拼接。
+    """
+    url = f"{base_url.rstrip('/')}/models"
     headers = {}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -37,9 +41,17 @@ async def run_speed_test(
     max_tokens: int = 256,
     temperature: float = 0.7,
     stream: bool = False,
+    disable_reasoning: bool = False,
+    provider_id: str = "",
+    provider_name: str = "",
 ) -> dict:
-    """Run a single speed test against an OpenAI-compatible API."""
-    url = f"{base_url.rstrip('/')}/v1/chat/completions"
+    """Run a single speed test against an OpenAI/Anthropic-compatible API.
+
+    base_url 需自带路径（含 /v1 等），不再自动拼接。
+    disable_reasoning 为 True 时尽量关闭模型的思考/推理（best-effort），
+    仅对支持该参数的服务商生效。
+    """
+    url = f"{base_url.rstrip('/')}/chat/completions"
     headers = {
         "Content-Type": "application/json",
     }
@@ -53,6 +65,8 @@ async def run_speed_test(
         "temperature": temperature,
         "stream": stream,
     }
+    if disable_reasoning:
+        payload["thinking"] = {"type": "disabled"}
 
     test_id = str(uuid.uuid4())
     created_at = datetime.now(timezone.utc).isoformat()
@@ -72,6 +86,7 @@ async def run_speed_test(
             content_chunk_count = 0
             first_token = True
             first_content_token = True
+            content_parts: list[str] = []
 
             async with httpx.AsyncClient(timeout=120.0) as client:
                 async with client.stream("POST", url, json=payload, headers=headers) as resp:
@@ -108,6 +123,7 @@ async def run_speed_test(
                                             content_ttft_ms = (time.perf_counter() - start) * 1000
                                             first_content_token = False
                                         content_chunk_count += 1
+                                        content_parts.append(ct)
                                 if usage:
                                     tokens_generated = usage.get("completion_tokens", 0) or 0
                                     details = usage.get("completion_tokens_details", {})
@@ -122,6 +138,7 @@ async def run_speed_test(
                 content_tokens = content_chunk_count
                 tokens_generated = reasoning_chunk_count + content_chunk_count
 
+            response_content = "".join(content_parts) or None
             total_latency_ms = (time.perf_counter() - start) * 1000
         else:
             async with httpx.AsyncClient(timeout=120.0) as client:
@@ -136,6 +153,7 @@ async def run_speed_test(
             reasoning_tokens = details.get("reasoning_tokens", 0) or 0
             content_tokens = tokens_generated - reasoning_tokens
             actual_model = data.get("model", model)
+            response_content = data.get("choices", [{}])[0].get("message", {}).get("content") or None
             # Non-streaming: no meaningful TTFT
             ttft_ms = None
             content_ttft_ms = None
@@ -147,6 +165,9 @@ async def run_speed_test(
             "base_url": base_url,
             "model": model,
             "actual_model": actual_model,
+            "provider_id": provider_id,
+            "provider_name": provider_name,
+            "response_content": response_content,
             "prompt": prompt,
             "max_tokens": max_tokens,
             "temperature": temperature,
@@ -168,6 +189,9 @@ async def run_speed_test(
             "base_url": base_url,
             "model": model,
             "actual_model": model,
+            "provider_id": provider_id,
+            "provider_name": provider_name,
+            "response_content": None,
             "prompt": prompt,
             "max_tokens": max_tokens,
             "temperature": temperature,
@@ -193,6 +217,8 @@ async def execute_batch_tests(
     concurrency: int,
     iterations: int,
     schedule_id: str | None = None,
+    disable_reasoning: bool = False,
+    max_rpm: int = -1,
 ) -> list[dict]:
     """批量执行测速并入库。batch 端点与定时调度器共用。
 
@@ -216,7 +242,9 @@ async def execute_batch_tests(
     semaphores = {key: asyncio.Semaphore(concurrency) for key in buckets}
 
     async def run_one(item: dict) -> dict:
-        sem = semaphores[(item["base_url"], item.get("api_key", ""))]
+        key = (item["base_url"], item.get("api_key", ""))
+        await limiter.acquire(key, max_rpm)
+        sem = semaphores[key]
         async with sem:
             try:
                 return await run_speed_test(
@@ -227,12 +255,15 @@ async def execute_batch_tests(
                     max_tokens=max_tokens,
                     temperature=temperature,
                     stream=stream,
+                    disable_reasoning=disable_reasoning,
+                    provider_id=item.get("provider_id", ""),
+                    provider_name=item.get("provider_name", ""),
                 )
             except Exception as e:
-                return _batch_error_result(e, prompt, max_tokens, temperature)
+                return _batch_error_result(e, item, prompt, max_tokens, temperature)
 
     results = await asyncio.gather(*[run_one(it) for it in all_items], return_exceptions=True)
-    results = [r if not isinstance(r, Exception) else _batch_error_result(r, prompt, max_tokens, temperature) for r in results]
+    results = [r if not isinstance(r, Exception) else _batch_error_result(r, it, prompt, max_tokens, temperature) for r, it in zip(results, all_items)]
 
     for r in results:
         await insert_speed_test(r, schedule_id)
@@ -240,13 +271,16 @@ async def execute_batch_tests(
     return results
 
 
-def _batch_error_result(exc: BaseException, prompt: str, max_tokens: int, temperature: float) -> dict:
+def _batch_error_result(exc: BaseException, item: dict, prompt: str, max_tokens: int, temperature: float) -> dict:
     """构造批量测速的失败兜底结果。"""
     return {
         "id": str(uuid.uuid4()),
-        "base_url": "",
-        "model": "error",
+        "base_url": item.get("base_url", ""),
+        "model": item.get("model", "error"),
         "actual_model": "error",
+        "provider_id": item.get("provider_id", ""),
+        "provider_name": item.get("provider_name", ""),
+        "response_content": None,
         "content_ttft_ms": None,
         "reasoning_tokens": 0,
         "content_tokens": 0,
@@ -257,7 +291,6 @@ def _batch_error_result(exc: BaseException, prompt: str, max_tokens: int, temper
         "total_latency_ms": 0,
         "tokens_generated": 0,
         "tps": 0,
-        "tpm": 0,
         "success": False,
         "error_message": str(exc),
         "created_at": datetime.now(timezone.utc).isoformat(),

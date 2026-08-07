@@ -119,10 +119,13 @@ def test_run_schedule_success_updates_status_and_advances(db, monkeypatch):
     captured = {}
 
     async def fake_execute(tests, prompt, max_tokens, temperature, stream,
-                           concurrency, iterations, schedule_id=None):
+                           concurrency, iterations, schedule_id=None,
+                           disable_reasoning=False, max_rpm=-1):
         captured["tests"] = tests
         captured["schedule_id"] = schedule_id
         captured["prompt"] = prompt
+        captured["disable_reasoning"] = disable_reasoning
+        captured["max_rpm"] = max_rpm
         return [{"success": True}, {"success": True}]
 
     monkeypatch.setattr("backend.scheduler.execute_batch_tests", fake_execute)
@@ -136,8 +139,13 @@ def test_run_schedule_success_updates_status_and_advances(db, monkeypatch):
     assert len(captured["tests"]) == 2
     assert all(t["base_url"] == "https://example.com" for t in captured["tests"])
     assert all(t["api_key"] == "sk-test" for t in captured["tests"])
+    assert all(t["provider_id"] for t in captured["tests"])
+    assert all(t["provider_name"] == "test-provider" for t in captured["tests"])
     assert captured["schedule_id"] == s["id"]
     assert captured["prompt"] == "hi"
+    # 新参数默认透传
+    assert captured["disable_reasoning"] is False
+    assert captured["max_rpm"] == -1
 
     updated = asyncio.run(get_schedule(s["id"]))
     assert updated["last_run_status"] == "success"

@@ -49,6 +49,8 @@ def _get_conn():
             stream           INTEGER DEFAULT 1,
             concurrency      INTEGER DEFAULT 1,
             iterations       INTEGER DEFAULT 1,
+            disable_reasoning INTEGER DEFAULT 0,
+            max_rpm          INTEGER DEFAULT -1,
             targets_json     TEXT DEFAULT '[]',
             created_at       TIMESTAMP,
             updated_at       TIMESTAMP,
@@ -63,6 +65,9 @@ def _get_conn():
             "reasoning_tokens INTEGER DEFAULT 0",
             "content_tokens INTEGER DEFAULT 0",
             "schedule_id TEXT",
+            "provider_id TEXT",
+            "provider_name TEXT",
+            "response_content TEXT",
         ]:
             col_name = col_def.split()[0]
             try:
@@ -73,6 +78,15 @@ def _get_conn():
             _local.conn.execute("ALTER TABLE providers ADD COLUMN models_json TEXT DEFAULT '[]'")
         except sqlite3.OperationalError:
             pass  # column already exists
+        for col_def in [
+            "disable_reasoning INTEGER DEFAULT 0",
+            "max_rpm INTEGER DEFAULT -1",
+        ]:
+            col_name = col_def.split()[0]
+            try:
+                _local.conn.execute(f"ALTER TABLE schedules ADD COLUMN {col_def}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
         _local.conn.commit()
     return _local.conn
 
@@ -101,8 +115,9 @@ async def insert_speed_test(result: dict, schedule_id: str | None = None) -> Non
            (id, base_url, model, actual_model, prompt, max_tokens, temperature,
             ttft_ms, content_ttft_ms, total_latency_ms, tokens_generated,
             reasoning_tokens, content_tokens, tps,
-            success, error_message, created_at, schedule_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            success, error_message, created_at, schedule_id,
+            provider_id, provider_name, response_content)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             result["id"],
             result["base_url"],
@@ -122,6 +137,9 @@ async def insert_speed_test(result: dict, schedule_id: str | None = None) -> Non
             result.get("error_message"),
             result.get("created_at"),
             schedule_id,
+            result.get("provider_id"),
+            result.get("provider_name"),
+            result.get("response_content"),
         ),
     )
 
@@ -290,18 +308,21 @@ async def create_schedule(
     stream: bool,
     concurrency: int,
     iterations: int,
+    disable_reasoning: bool = False,
+    max_rpm: int = -1,
 ) -> dict:
     sid = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     _run(
         """INSERT INTO schedules
            (id, name, enabled, interval_minutes, prompt, max_tokens, temperature,
-            stream, concurrency, iterations, targets_json,
+            stream, concurrency, iterations, disable_reasoning, max_rpm, targets_json,
             created_at, updated_at, next_run_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             sid, name, 1, interval_minutes, prompt, max_tokens, temperature,
             1 if stream else 0, concurrency, iterations,
+            1 if disable_reasoning else 0, max_rpm,
             json.dumps(targets), now, now,
             _next_run_iso(now, interval_minutes),
         ),
@@ -324,6 +345,8 @@ async def update_schedule(schedule_id: str, fields: dict) -> dict | None:
         "stream": int(bool(fields.get("stream", existing["stream"]))),
         "concurrency": fields.get("concurrency", existing["concurrency"]),
         "iterations": fields.get("iterations", existing["iterations"]),
+        "disable_reasoning": int(bool(fields.get("disable_reasoning", existing["disable_reasoning"]))),
+        "max_rpm": fields.get("max_rpm", existing["max_rpm"]),
         "enabled": int(bool(fields.get("enabled", existing["enabled"]))),
     }
     # 编辑后重置下次执行时间，从此刻开始计时
@@ -332,13 +355,14 @@ async def update_schedule(schedule_id: str, fields: dict) -> dict | None:
     _run(
         """UPDATE schedules SET
            name=?, interval_minutes=?, targets_json=?, prompt=?, max_tokens=?,
-           temperature=?, stream=?, concurrency=?, iterations=?, enabled=?,
-           next_run_at=?, updated_at=?
+           temperature=?, stream=?, concurrency=?, iterations=?, disable_reasoning=?,
+           max_rpm=?, enabled=?, next_run_at=?, updated_at=?
            WHERE id=?""",
         (
             m["name"], m["interval_minutes"], m["targets_json"], m["prompt"],
             m["max_tokens"], m["temperature"], m["stream"], m["concurrency"],
-            m["iterations"], m["enabled"], m["next_run_at"], m["updated_at"],
+            m["iterations"], m["disable_reasoning"], m["max_rpm"], m["enabled"],
+            m["next_run_at"], m["updated_at"],
             schedule_id,
         ),
     )

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { FlaskConical } from "lucide-react";
 
@@ -8,6 +9,8 @@ export interface TestParamsValues {
   concurrency: number;
   iterations: number;
   stream: boolean;
+  disableReasoning: boolean;
+  maxRpm: number;
 }
 
 export const DEFAULT_PARAMS: TestParamsValues = {
@@ -17,15 +20,46 @@ export const DEFAULT_PARAMS: TestParamsValues = {
   concurrency: 1,
   iterations: 1,
   stream: true,
+  disableReasoning: false,
+  maxRpm: -1,
 };
+
+const STORAGE_KEY = "token-speed.test-params.v1";
+
+export function loadSavedParams(): TestParamsValues {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULT_PARAMS;
+    return { ...DEFAULT_PARAMS, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_PARAMS;
+  }
+}
+
+function saveParams(values: TestParamsValues) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(values));
+  } catch {
+    // localStorage 不可用时静默忽略
+  }
+}
 
 interface Props {
   values: TestParamsValues;
   onChange: (values: TestParamsValues) => void;
+  /** 是否持久化到 localStorage。仅手动测速表单启用，定时任务编辑不覆盖已记忆配置。 */
+  persist?: boolean;
 }
 
-/** 测速参数输入组，SpeedTestForm 与 ScheduleForm 共用。受控组件。 */
-export default function TestParamsFields({ values, onChange }: Props) {
+/** 测速参数输入组，SpeedTestForm 与 ScheduleForm 共用。受控组件。
+ *
+ * persist 时值变化自动持久化到 localStorage，下次打开沿用上次测试配置。
+ */
+export default function TestParamsFields({ values, onChange, persist = true }: Props) {
+  useEffect(() => {
+    if (persist) saveParams(values);
+  }, [values, persist]);
+
   const set = (patch: Partial<TestParamsValues>) => onChange({ ...values, ...patch });
 
   return (
@@ -66,6 +100,28 @@ export default function TestParamsFields({ values, onChange }: Props) {
         <input type="checkbox" checked={values.stream} onChange={(e) => set({ stream: e.target.checked })} className="rounded border-input text-primary focus:ring-ring" />
         <span className="text-sm text-muted-foreground">Streaming 模式</span>
       </label>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="space-y-1.5">
+          <label className="text-xs text-muted-foreground">每分钟最大请求</label>
+          <Input
+            type="number"
+            min={-1}
+            value={values.maxRpm}
+            title="按服务商分别限速，-1 表示不限速"
+            onChange={(e) => set({ maxRpm: Number(e.target.value) })}
+          />
+        </div>
+        <label className="flex items-center gap-2 cursor-pointer col-span-2 sm:col-span-3">
+          <input
+            type="checkbox"
+            checked={values.disableReasoning}
+            onChange={(e) => set({ disableReasoning: e.target.checked })}
+            className="rounded border-input text-primary focus:ring-ring"
+          />
+          <span className="text-sm text-muted-foreground">关闭思考（尽量）</span>
+        </label>
+      </div>
     </>
   );
 }
