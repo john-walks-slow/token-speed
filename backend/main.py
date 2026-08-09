@@ -5,7 +5,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -41,6 +41,7 @@ from .models import (
 from .scheduler import SpeedTestScheduler
 from .speed_test import list_models, run_speed_test
 from .rate_limit import limiter
+from .security import admin_password, AdminAuthMiddleware
 from . import autostart, paths, network_settings as net_settings
 
 
@@ -56,6 +57,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Token Speed", version="1.0.0", lifespan=lifespan)
 
+# 路由拆分：read_router（只读集）供主应用与独立看板 app 共享；
+# admin_router（管理集）仅主应用挂载，由 AdminAuthMiddleware 保护。
+read_router = APIRouter()
+admin_router = APIRouter()
+
 # 本机工具：CORS 仅放行 localhost/127.0.0.1 各端口（开发 5173、桌面动态端口、旧 preview）
 app.add_middleware(
     CORSMiddleware,
@@ -64,9 +70,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# 管理密码：配置后拦截 /api 下非只读请求；静态资源与只读集不拦截
+app.add_middleware(AdminAuthMiddleware)
 
 
-@app.post("/api/connect", response_model=ConnectResponse)
+@admin_router.post("/api/connect", response_model=ConnectResponse)
 async def connect(req: ConnectRequest):
     success, result = await list_models(req.base_url, req.api_key, req.protocol)
     if success:
@@ -74,7 +82,7 @@ async def connect(req: ConnectRequest):
     return ConnectResponse(success=False, error=str(result))
 
 
-@app.post("/api/speed-test", response_model=SpeedTestResult)
+@admin_router.post("/api/speed-test", response_model=SpeedTestResult)
 async def speed_test(req: SpeedTestRequest):
     result = await run_speed_test(
         base_url=req.base_url,
@@ -254,7 +262,7 @@ async def _iter_batch_results(req: BatchSpeedTestRequest):
             await asyncio.gather(*tasks, return_exceptions=True)
 
 
-@app.post("/api/speed-test/batch", response_model=BatchSpeedTestResponse)
+@admin_router.post("/api/speed-test/batch", response_model=BatchSpeedTestResponse)
 async def batch_speed_test(req: BatchSpeedTestRequest):
     results = [r async for r in _iter_batch_results(req)]
 
@@ -270,7 +278,7 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-@app.post("/api/speed-test/batch-stream")
+@admin_router.post("/api/speed-test/batch-stream")
 async def batch_speed_test_stream(req: BatchSpeedTestRequest):
     total = len(req.tests) * req.iterations
 
@@ -291,13 +299,13 @@ async def batch_speed_test_stream(req: BatchSpeedTestRequest):
     )
 
 
-@app.get("/api/history", response_model=list[SpeedTestHistory])
+@read_router.get("/api/history", response_model=list[SpeedTestHistory])
 async def history(limit: int = Query(default=50, le=500), offset: int = Query(default=0)):
     tests = await get_all_tests(limit=limit, offset=offset)
     return [SpeedTestHistory(**t) for t in tests]
 
 
-@app.get("/api/history/{test_id}", response_model=SpeedTestResult | None)
+@read_router.get("/api/history/{test_id}", response_model=SpeedTestResult | None)
 async def history_detail(test_id: str):
     test = await get_test_by_id(test_id)
     if test is None:
@@ -305,7 +313,7 @@ async def history_detail(test_id: str):
     return SpeedTestResult(**test)
 
 
-@app.delete("/api/history/{test_id}")
+@admin_router.delete("/api/history/{test_id}")
 async def remove_test(test_id: str):
     ok = await delete_test(test_id)
     if not ok:
@@ -313,13 +321,25 @@ async def remove_test(test_id: str):
     return {"message": "Test deleted"}
 
 
-@app.delete("/api/history")
+@admin_router.delete("/api/history")
 async def clear_history():
     await delete_all_tests()
     return {"message": "History cleared"}
 
 
-@app.get("/api/stats", response_model=StatsResponse)
+@read_router.get("/api/mode")
+async def mode():
+    """主应用模式标识；独立看板 app 返回 dashboard。"""
+    return {"mode": "full"}
+
+
+@read_router.get("/api/auth/status")
+async def auth_status():
+    """前端判断是否需登录门：是否已配置管理密码。"""
+    return {"required": bool(admin_password())}
+
+
+@read_router.get("/api/stats", response_model=StatsResponse)
 async def stats():
     return await get_stats()
 
@@ -327,19 +347,19 @@ async def stats():
 # ── Provider CRUD ──────────────────────────────────────────────
 
 
-@app.get("/api/providers", response_model=ProviderListResponse)
+@admin_router.get("/api/providers", response_model=ProviderListResponse)
 async def get_providers():
     providers = await list_providers()
     return ProviderListResponse(providers=[ProviderResponse(**p) for p in providers])
 
 
-@app.post("/api/providers", response_model=ProviderResponse, status_code=201)
+@admin_router.post("/api/providers", response_model=ProviderResponse, status_code=201)
 async def add_provider(req: ProviderCreate):
     p = await create_provider(req.name, req.base_url, req.api_key, req.models if req.models else None, protocol=req.protocol)
     return ProviderResponse(**p)
 
 
-@app.put("/api/providers/{provider_id}", response_model=ProviderResponse)
+@admin_router.put("/api/providers/{provider_id}", response_model=ProviderResponse)
 async def edit_provider(provider_id: str, req: ProviderUpdate):
     p = await update_provider(provider_id, req.name, req.base_url, req.api_key, models=req.models, protocol=req.protocol)
     if p is None:
@@ -347,7 +367,7 @@ async def edit_provider(provider_id: str, req: ProviderUpdate):
     return ProviderResponse(**p)
 
 
-@app.put("/api/providers/{provider_id}/models", response_model=ProviderResponse)
+@admin_router.put("/api/providers/{provider_id}/models", response_model=ProviderResponse)
 async def update_provider_models(provider_id: str, req: ProviderModelsUpdate):
     p = await save_provider_models(provider_id, req.models)
     if p is None:
@@ -355,7 +375,7 @@ async def update_provider_models(provider_id: str, req: ProviderModelsUpdate):
     return ProviderResponse(**p)
 
 
-@app.delete("/api/providers/{provider_id}")
+@admin_router.delete("/api/providers/{provider_id}")
 async def remove_provider(provider_id: str):
     ok = await delete_provider(provider_id)
     if not ok:
@@ -391,13 +411,13 @@ def _schedule_response(s: dict) -> ScheduleResponse:
     )
 
 
-@app.get("/api/schedules", response_model=list[ScheduleResponse])
+@read_router.get("/api/schedules", response_model=list[ScheduleResponse])
 async def get_schedules():
     schedules = await list_schedules()
     return [_schedule_response(s) for s in schedules]
 
 
-@app.post("/api/schedules", response_model=ScheduleResponse, status_code=201)
+@admin_router.post("/api/schedules", response_model=ScheduleResponse, status_code=201)
 async def add_schedule(req: ScheduleCreate):
     s = await create_schedule(
         name=req.name,
@@ -414,7 +434,7 @@ async def add_schedule(req: ScheduleCreate):
     return _schedule_response(s)
 
 
-@app.put("/api/schedules/{schedule_id}", response_model=ScheduleResponse)
+@admin_router.put("/api/schedules/{schedule_id}", response_model=ScheduleResponse)
 async def edit_schedule(schedule_id: str, req: ScheduleUpdate):
     # model_dump 已把 ScheduleTarget 转成 dict，无需再 model_dump
     fields = req.model_dump(exclude_unset=True)
@@ -424,7 +444,7 @@ async def edit_schedule(schedule_id: str, req: ScheduleUpdate):
     return _schedule_response(s)
 
 
-@app.delete("/api/schedules/{schedule_id}")
+@admin_router.delete("/api/schedules/{schedule_id}")
 async def remove_schedule(schedule_id: str):
     ok = await delete_schedule(schedule_id)
     if not ok:
@@ -432,7 +452,7 @@ async def remove_schedule(schedule_id: str):
     return {"message": "Schedule deleted"}
 
 
-@app.put("/api/schedules/{schedule_id}/toggle", response_model=ScheduleResponse)
+@admin_router.put("/api/schedules/{schedule_id}/toggle", response_model=ScheduleResponse)
 async def toggle_schedule(schedule_id: str, enabled: bool = Query(...)):
     s = await set_schedule_enabled(schedule_id, enabled)
     if s is None:
@@ -440,7 +460,7 @@ async def toggle_schedule(schedule_id: str, enabled: bool = Query(...)):
     return _schedule_response(s)
 
 
-@app.post("/api/schedules/{schedule_id}/run", response_model=ScheduleResponse)
+@admin_router.post("/api/schedules/{schedule_id}/run", response_model=ScheduleResponse)
 async def run_schedule_now(schedule_id: str):
     if scheduler.is_running(schedule_id):
         raise HTTPException(409, "Schedule is already running")
@@ -459,7 +479,7 @@ class AutostartSettings(BaseModel):
     enabled: bool
 
 
-@app.get("/api/settings/autostart", response_model=AutostartSettings)
+@admin_router.get("/api/settings/autostart", response_model=AutostartSettings)
 async def get_autostart():
     return AutostartSettings(supported=autostart.supported(), enabled=autostart.is_enabled())
 
@@ -468,7 +488,7 @@ class AutostartUpdate(BaseModel):
     enabled: bool
 
 
-@app.put("/api/settings/autostart", response_model=AutostartSettings)
+@admin_router.put("/api/settings/autostart", response_model=AutostartSettings)
 async def set_autostart(req: AutostartUpdate):
     if not autostart.supported():
         return AutostartSettings(supported=False, enabled=False)
@@ -476,18 +496,23 @@ async def set_autostart(req: AutostartUpdate):
     return AutostartSettings(supported=True, enabled=req.enabled if ok else autostart.is_enabled())
 
 
-@app.get("/api/settings/network", response_model=NetworkSettings)
+@admin_router.get("/api/settings/network", response_model=NetworkSettings)
 async def get_network():
     return NetworkSettings(**net_settings.get_network_settings())
 
 
-@app.put("/api/settings/network", response_model=NetworkSettings)
+@admin_router.put("/api/settings/network", response_model=NetworkSettings)
 async def set_network(req: NetworkSettings):
     try:
         data = await net_settings.update_network_settings(req.model_dump())
     except ValueError as e:
         raise HTTPException(400, str(e))
     return NetworkSettings(**data)
+
+
+# 路由挂载：只读集共享（看板 app 只挂 read_router），管理集仅主应用
+app.include_router(read_router)
+app.include_router(admin_router)
 
 
 # ── 前端静态资源（桌面/已构建场景）─────────────────────────────

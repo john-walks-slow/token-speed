@@ -14,9 +14,11 @@ import { Trash2, X, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 interface Props {
   refreshKey: number;
   providers: Provider[];
+  /** 只读模式（独立看板）：隐藏删除/清空操作。 */
+  readOnly?: boolean;
 }
 
-export default function HistoryList({ refreshKey, providers }: Props) {
+export default function HistoryList({ refreshKey, providers, readOnly = false }: Props) {
   const [tests, setTests] = useState<TestHistory[]>([]);
   const [scheduleNames, setScheduleNames] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -64,10 +66,12 @@ export default function HistoryList({ refreshKey, providers }: Props) {
             {filteredTests.length}
           </Badge>
         </div>
-        <Button variant="ghost" size="sm" onClick={handleClear} disabled={tests.length === 0}>
-          <Trash2 className="w-3.5 h-3.5" />
-          清空
-        </Button>
+        {!readOnly && (
+          <Button variant="ghost" size="sm" onClick={handleClear} disabled={tests.length === 0}>
+            <Trash2 className="w-3.5 h-3.5" />
+            清空
+          </Button>
+        )}
       </div>
 
       {/* 日期过滤 */}
@@ -111,13 +115,15 @@ export default function HistoryList({ refreshKey, providers }: Props) {
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     {!t.success && <ErrorMessageView message={t.error_message} />}
-                    <button
-                      title="删除"
-                      onClick={() => handleDelete(t.id)}
-                      className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-0.5"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
+                    {!readOnly && (
+                      <button
+                        title="删除"
+                        onClick={() => handleDelete(t.id)}
+                        className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-0.5"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
