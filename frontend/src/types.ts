@@ -26,7 +26,8 @@ export interface SpeedTestResult {
   tokens_generated: number;
   reasoning_tokens: number;
   content_tokens: number;
-  tps: number;
+  thinking_ms: number | null;
+  tps: number | null;
   success: boolean;
   error_message: string | null;
   created_at: string;
@@ -36,10 +37,11 @@ export interface BatchSummary {
   total_tests: number;
   successful: number;
   failed: number;
-  avg_tps: number;
+  avg_tps: number | null;
   avg_latency_ms: number;
   best_model: string;
-  best_tps: number;
+  best_tps: number | null;
+  best_base_url?: string;
 }
 
 export interface SpeedTestItem {
@@ -69,8 +71,10 @@ export interface TestHistory {
   tokens_generated: number;
   reasoning_tokens: number;
   content_tokens: number;
-  tps: number;
+  thinking_ms: number | null;
+  tps: number | null;
   success: boolean;
+  error_message?: string | null;
   created_at: string;
   schedule_id?: string | null;
 }
@@ -149,4 +153,19 @@ export interface ScheduleCreate {
 }
 
 export type ScheduleUpdate = Partial<ScheduleCreate>;
+
+// ── Settings（桌面）────────────────────────────────────────────
+
+export interface AutostartSettings {
+  supported: boolean;
+  enabled: boolean;
+}
+
+// ── Network Settings ──────────────────────────────────────────
+
+export interface NetworkSettings {
+  proxy_mode: "system" | "custom" | "none";
+  custom_proxy: string;
+  verify_ssl: boolean;
+}
 

@@ -1,5 +1,18 @@
 @import "tailwindcss";
 
+/* 默认深色 color-scheme，让原生控件（checkbox/select/input）与主题一致 */
+:root {
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+  }
+}
+
 @theme {
   --color-background: oklch(0.145 0 0);
   --color-foreground: oklch(0.985 0 0);
@@ -23,22 +36,109 @@
   --radius: 0.5rem;
 }
 
+/* 浅色主题变量：data-theme="light" 强制；无 data-theme 时跟随系统 */
+:root[data-theme="light"] {
+  --color-background: oklch(0.985 0 0);
+  --color-foreground: oklch(0.145 0 0);
+  --color-card: oklch(1 0 0);
+  --color-card-foreground: oklch(0.145 0 0);
+  --color-popover: oklch(1 0 0);
+  --color-popover-foreground: oklch(0.145 0 0);
+  --color-primary: oklch(0.627 0.194 149.214);
+  --color-primary-foreground: oklch(0.985 0 0);
+  --color-secondary: oklch(0.97 0 0);
+  --color-secondary-foreground: oklch(0.205 0 0);
+  --color-muted: oklch(0.97 0 0);
+  --color-muted-foreground: oklch(0.556 0 0);
+  --color-accent: oklch(0.97 0 0);
+  --color-accent-foreground: oklch(0.205 0 0);
+  --color-destructive: oklch(0.577 0.245 27.325);
+  --color-destructive-foreground: oklch(0.985 0 0);
+  --color-border: oklch(0.922 0 0);
+  --color-input: oklch(0.922 0 0);
+  --color-ring: oklch(0.627 0.194 149.214);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --color-background: oklch(0.985 0 0);
+    --color-foreground: oklch(0.145 0 0);
+    --color-card: oklch(1 0 0);
+    --color-card-foreground: oklch(0.145 0 0);
+    --color-popover: oklch(1 0 0);
+    --color-popover-foreground: oklch(0.145 0 0);
+    --color-primary: oklch(0.627 0.194 149.214);
+    --color-primary-foreground: oklch(0.985 0 0);
+    --color-secondary: oklch(0.97 0 0);
+    --color-secondary-foreground: oklch(0.205 0 0);
+    --color-muted: oklch(0.97 0 0);
+    --color-muted-foreground: oklch(0.556 0 0);
+    --color-accent: oklch(0.97 0 0);
+    --color-accent-foreground: oklch(0.205 0 0);
+    --color-destructive: oklch(0.577 0.245 27.325);
+    --color-destructive-foreground: oklch(0.985 0 0);
+    --color-border: oklch(0.922 0 0);
+    --color-input: oklch(0.922 0 0);
+    --color-ring: oklch(0.627 0.194 149.214);
+  }
+}
+
 * {
   border-color: var(--color-border);
+}
+
+html {
+  height: 100%;
 }
 
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
+  /* 内容不足视口时不显示滚动条；超高时才出现 */
+  overflow-y: auto;
+  min-height: 100%;
+}
+
+#root {
+  min-height: 100%;
+}
+
+/* 现代滚动条：WebKit (Chromium/WebView2) + Firefox */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--color-border) 90%, transparent);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklch, var(--color-muted-foreground) 60%, transparent);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
 }
 
 /* 图表 tooltip：recharts 默认文本色在暗色主题下不可见，统一覆盖为前景色 */
 .recharts-default-tooltip,
 .recharts-tooltip-wrapper {
-  color: var(--color-foreground);
+  background: var(--color-popover) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-foreground) !important;
 }
 .recharts-tooltip-wrapper * {
-  color: var(--color-foreground);
+  color: var(--color-foreground) !important;
 }
 .recharts-tooltip-cursor {
   fill: oklch(0.269 0 0 / 0.25);

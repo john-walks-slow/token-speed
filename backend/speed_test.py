@@ -1,4 +1,5 @@
 import asyncio
+import json
 import time
 import uuid
 from datetime import datetime, timezone
@@ -7,20 +8,121 @@ import httpx
 
 from .database import insert_speed_test
 from .rate_limit import limiter
+from .network_settings import client_kwargs as net_client_kwargs
+from .url_utils import normalize_base_url
 
 
-async def list_models(base_url: str, api_key: str = "") -> tuple[bool, list[dict] | str]:
-    """Fetch available models from an OpenAI-compatible API endpoint.
+def _extract_reasoning_tokens(usage: dict) -> int:
+    """从 usage 中读取 reasoning/thinking token 数，兼容多厂商字段。
+
+    OpenAI/DeepSeek: completion_tokens_details.reasoning_tokens（计入 completion_tokens）
+    OpenAI Responses: output_tokens_details.reasoning_tokens
+    Anthropic 兼容层: output_tokens_details.thinking_tokens
+    xAI(gRPC): 顶层 reasoning_tokens
+    Gemini: thoughts_token_count 为独立字段、不计入 candidates_token_count，
+    content_tokens = completion - reasoning 天然正确，无需在此读取。
+    解析失败/缺失统一返回 0，由调用方以 content = completion - reasoning 兜底。
+    """
+    try:
+        if not isinstance(usage, dict):
+            return 0
+        for wrapper in ("completion_tokens_details", "output_tokens_details"):
+            details = usage.get(wrapper) or {}
+            if not isinstance(details, dict):
+                continue
+            for key in ("reasoning_tokens", "thinking_tokens"):
+                val = details.get(key)
+                if isinstance(val, int) and val > 0:
+                    return val
+        val = usage.get("reasoning_tokens")
+        if isinstance(val, int) and val > 0:
+            return val
+        return 0
+    except Exception:
+        return 0
+
+
+async def _raise_for_openai_error(resp: httpx.Response) -> None:
+    """OpenAI 兼容端点非 2xx 时，读取响应体 error.message 提升异常信息。
+
+    默认 raise_for_status 只含状态码与 URL，不含具体原因（如 400 Unknown parameter: thinking），
+    用户看不到"为什么失败"。此处把响应体里的 error.message 拼进异常文本。
+    """
+    if resp.status_code < 400:
+        return
+    detail = ""
+    try:
+        await resp.aread()
+        data = resp.json()
+        if isinstance(data, dict):
+            err = data.get("error")
+            if isinstance(err, dict):
+                detail = err.get("message") or ""
+            elif isinstance(err, str):
+                detail = err
+    except Exception:
+        pass
+    message = f"HTTP {resp.status_code}"
+    if detail:
+        message += f": {detail}"
+    raise httpx.HTTPStatusError(message, request=resp.request, response=resp)
+
+
+def _extract_stream_chunk(chunk: dict, protocol: str) -> dict:
+    """提取流式 chunk 的统一字段，屏蔽 openai/anthropic 事件结构差异。
+
+    返回 {text, reasoning, model, usage, done}。text/reasoning 为该 chunk 的增量文本，
+    model 有值则更新 actual_model，usage 有值则用于更新 token 统计，done 表示流已结束。
+    """
+    if protocol == "anthropic":
+        etype = chunk.get("type")
+        if etype == "message_start":
+            msg = chunk.get("message") or {}
+            return {"text": None, "reasoning": None, "model": msg.get("model"), "usage": None, "done": False}
+        if etype == "content_block_delta":
+            delta = chunk.get("delta") or {}
+            dtype = delta.get("type")
+            if dtype == "text_delta":
+                return {"text": delta.get("text"), "reasoning": None, "model": None, "usage": None, "done": False}
+            if dtype == "thinking_delta":
+                return {"text": None, "reasoning": delta.get("thinking"), "model": None, "usage": None, "done": False}
+            return {"text": None, "reasoning": None, "model": None, "usage": None, "done": False}
+        if etype == "message_delta":
+            return {"text": None, "reasoning": None, "model": None, "usage": chunk.get("usage"), "done": False}
+        if etype == "message_stop":
+            return {"text": None, "reasoning": None, "model": None, "usage": None, "done": True}
+        return {"text": None, "reasoning": None, "model": None, "usage": None, "done": False}
+
+    # openai 兼容
+    choices = chunk.get("choices") or []
+    delta = choices[0].get("delta", {}) if choices else {}
+    return {
+        "text": delta.get("content"),
+        "reasoning": delta.get("reasoning_content") or delta.get("reasoning"),
+        "model": chunk.get("model"),
+        "usage": chunk.get("usage"),
+        "done": False,  # [DONE] 哨兵由调用方处理
+    }
+
+
+async def list_models(base_url: str, api_key: str = "", protocol: str = "openai") -> tuple[bool, list[dict] | str]:
+    """Fetch available models from an OpenAI-compatible / Anthropic API endpoint.
 
     base_url 需自带路径（含 /v1 等），不再自动拼接。
+    protocol=anthropic 时走 Anthropic 原生鉴权头（x-api-key + anthropic-version）。
     """
-    url = f"{base_url.rstrip('/')}/models"
+    base = normalize_base_url(base_url)
+    url = f"{base}/models"
     headers = {}
     if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+        if protocol == "anthropic":
+            headers["x-api-key"] = api_key
+            headers["anthropic-version"] = "2023-06-01"
+        else:
+            headers["Authorization"] = f"Bearer {api_key}"
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, **net_client_kwargs()) as client:
             resp = await client.get(url, headers=headers)
             resp.raise_for_status()
             data = resp.json()
@@ -44,27 +146,49 @@ async def run_speed_test(
     disable_reasoning: bool = False,
     provider_id: str = "",
     provider_name: str = "",
+    protocol: str = "openai",
 ) -> dict:
-    """Run a single speed test against an OpenAI/Anthropic-compatible API.
+    """Run a single speed test against an OpenAI-compatible / Anthropic native API.
 
     base_url 需自带路径（含 /v1 等），不再自动拼接。
+    protocol=anthropic 时请求 {base}/messages，用 x-api-key + anthropic-version，
+    且不发送 temperature（Anthropic 4.7+ 模型已移除该参数，省略最稳妥）。
     disable_reasoning 为 True 时尽量关闭模型的思考/推理（best-effort），
     仅对支持该参数的服务商生效。
     """
-    url = f"{base_url.rstrip('/')}/chat/completions"
-    headers = {
-        "Content-Type": "application/json",
-    }
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "stream": stream,
-    }
+    base = normalize_base_url(base_url)
+    if protocol == "anthropic":
+        url = f"{base}/messages"
+        headers = {
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01",
+        }
+        if api_key:
+            headers["x-api-key"] = api_key
+        payload: dict = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "stream": stream,
+        }
+    else:
+        url = f"{base}/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+        }
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": stream,
+        }
+        if stream:
+            # 多数 OpenAI-compatible 端点默认不返回流式 usage，追加 include_usage 以拿到准确 token 数。
+            # 个别不识别该字段的端点会忽略它（OpenAI 兼容约定），不影响请求。
+            payload["stream_options"] = {"include_usage": True}
     if disable_reasoning:
         payload["thinking"] = {"type": "disabled"}
 
@@ -88,9 +212,9 @@ async def run_speed_test(
             first_content_token = True
             content_parts: list[str] = []
 
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=120.0, **net_client_kwargs()) as client:
                 async with client.stream("POST", url, json=payload, headers=headers) as resp:
-                    resp.raise_for_status()
+                    await _raise_for_openai_error(resp)
                     async for line in resp.aiter_lines():
                         if not line.strip() or line.startswith(":"):
                             continue
@@ -108,7 +232,7 @@ async def run_speed_test(
                                 choices = chunk.get("choices", [])
                                 if choices:
                                     delta = choices[0].get("delta", {})
-                                    rc = delta.get("reasoning_content")
+                                    rc = delta.get("reasoning_content") or delta.get("reasoning")
                                     ct = delta.get("content")
                                     if rc:
                                         if first_token:
@@ -126,13 +250,13 @@ async def run_speed_test(
                                         content_parts.append(ct)
                                 if usage:
                                     tokens_generated = usage.get("completion_tokens", 0) or 0
-                                    details = usage.get("completion_tokens_details", {})
-                                    reasoning_tokens = details.get("reasoning_tokens", 0) or 0
-                                    content_tokens = tokens_generated - reasoning_tokens
+                                    reasoning_tokens = _extract_reasoning_tokens(usage)
+                                    content_tokens = max(tokens_generated - reasoning_tokens, 0)
                             except json.JSONDecodeError:
                                 continue
 
-            # Fallback to chunk counts if usage not provided
+            # Fallback to chunk counts if usage not provided（近似口径：chunk 数 ≈ token 数，
+            # 对按 chunk 批吐多 token 的端点会低估速度；多数端点加了 include_usage 后会返回 usage）
             if tokens_generated == 0:
                 reasoning_tokens = reasoning_chunk_count
                 content_tokens = content_chunk_count
@@ -141,24 +265,30 @@ async def run_speed_test(
             response_content = "".join(content_parts) or None
             total_latency_ms = (time.perf_counter() - start) * 1000
         else:
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=120.0, **net_client_kwargs()) as client:
                 resp = await client.post(url, json=payload, headers=headers)
-                resp.raise_for_status()
+                await _raise_for_openai_error(resp)
                 data = resp.json()
 
             total_latency_ms = (time.perf_counter() - start) * 1000
             usage = data.get("usage", {})
             tokens_generated = usage.get("completion_tokens", 0) or 0
-            details = usage.get("completion_tokens_details", {})
-            reasoning_tokens = details.get("reasoning_tokens", 0) or 0
-            content_tokens = tokens_generated - reasoning_tokens
+            reasoning_tokens = _extract_reasoning_tokens(usage)
+            content_tokens = max(tokens_generated - reasoning_tokens, 0)
             actual_model = data.get("model", model)
             response_content = data.get("choices", [{}])[0].get("message", {}).get("content") or None
             # Non-streaming: no meaningful TTFT
             ttft_ms = None
             content_ttft_ms = None
 
-        tps = (tokens_generated / (total_latency_ms / 1000)) if total_latency_ms > 0 and tokens_generated > 0 else 0
+        # 回答阶段生成速度：排除 TTFT（content_ttft 起算）与 reasoning tokens/时长。
+        # 仅流式且能定位首个回答 token 时才有意义；否则 None（前端显示 N/A）。
+        if content_ttft_ms is not None and content_tokens > 0:
+            gen_time_s = max(total_latency_ms - content_ttft_ms, 0) / 1000
+            tps = (content_tokens / gen_time_s) if gen_time_s > 0 else None
+        else:
+            tps = None
+        thinking_ms = (content_ttft_ms - ttft_ms) if (content_ttft_ms is not None and ttft_ms is not None) else None
 
         return {
             "id": test_id,
@@ -177,7 +307,8 @@ async def run_speed_test(
             "tokens_generated": tokens_generated,
             "reasoning_tokens": reasoning_tokens,
             "content_tokens": content_tokens,
-            "tps": round(tps, 2),
+            "thinking_ms": round(thinking_ms, 2) if thinking_ms is not None else None,
+            "tps": round(tps, 2) if tps is not None else None,
             "success": True,
             "error_message": None,
             "created_at": created_at,
@@ -201,7 +332,8 @@ async def run_speed_test(
             "tokens_generated": 0,
             "reasoning_tokens": 0,
             "content_tokens": 0,
-            "tps": 0,
+            "thinking_ms": None,
+            "tps": None,
             "success": False,
             "error_message": str(e),
             "created_at": created_at,
@@ -290,7 +422,8 @@ def _batch_error_result(exc: BaseException, item: dict, prompt: str, max_tokens:
         "ttft_ms": None,
         "total_latency_ms": 0,
         "tokens_generated": 0,
-        "tps": 0,
+        "thinking_ms": None,
+        "tps": None,
         "success": False,
         "error_message": str(exc),
         "created_at": datetime.now(timezone.utc).isoformat(),

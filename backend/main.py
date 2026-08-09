@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -7,6 +8,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .database import (
@@ -30,6 +32,7 @@ from .models import (
     ProviderModelsUpdate,
     ProviderResponse,
     ProviderListResponse,
+    NetworkSettings,
     ScheduleCreate,
     ScheduleUpdate,
     ScheduleTarget,
@@ -38,6 +41,7 @@ from .models import (
 from .scheduler import SpeedTestScheduler
 from .speed_test import list_models, run_speed_test
 from .rate_limit import limiter
+from . import autostart, paths, network_settings as net_settings
 
 
 scheduler = SpeedTestScheduler()
@@ -52,9 +56,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Token Speed", version="1.0.0", lifespan=lifespan)
 
+# 本机工具：CORS 仅放行 localhost/127.0.0.1 各端口（开发 5173、桌面动态端口、旧 preview）
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -134,26 +139,71 @@ def _to_error_result(item: BatchSpeedTestItem, req: BatchSpeedTestRequest, error
         "ttft_ms": None,
         "total_latency_ms": 0,
         "tokens_generated": 0,
-        "tps": 0,
+        "thinking_ms": None,
+        "tps": None,
         "success": False,
         "error_message": str(error),
         "created_at": now_iso,
     }
 
 
+def _median(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    s = sorted(values)
+    n = len(s)
+    mid = n // 2
+    if n % 2:
+        return s[mid]
+    return (s[mid - 1] + s[mid]) / 2
+
+
 def compute_summary(parsed: list[SpeedTestResult]) -> BatchSummary:
+    """按 (base_url, model) 分组成功样本，组内取 median(P50) 作为该模型代表值。
+
+    速度/延迟在长尾下用 median 比 mean 稳定；失败样本不计入。
+    """
     successful = [r for r in parsed if r.success]
-    avg_tps = sum(r.tps for r in successful) / len(successful) if successful else 0
-    avg_lat = sum(r.total_latency_ms for r in successful) / len(successful) if successful else 0
-    best = max(successful, key=lambda r: r.tps) if successful else None
+
+    groups: dict[tuple[str, str], list[SpeedTestResult]] = {}
+    for r in successful:
+        if r.tps is None:
+            continue  # 无生成速度（如 non-stream）不参与速度汇总
+        groups.setdefault((r.base_url, r.model), []).append(r)
+
+    reps = []
+    for (base_url, model), rs in groups.items():
+        reps.append({
+            "base_url": base_url,
+            "model": model,
+            "tps": _median([r.tps for r in rs]),
+            "latency_ms": _median([r.total_latency_ms for r in rs]),
+        })
+
+    if reps:
+        avg_tps = sum(r["tps"] for r in reps) / len(reps)
+        avg_lat = sum(r["latency_ms"] for r in reps) / len(reps)
+        best = max(reps, key=lambda r: r["tps"])
+        best_model = best["model"]
+        best_tps = best["tps"]
+        best_base_url = best["base_url"]
+    else:
+        # 无速度样本（如全 non-stream）：avg_tps/best_tps 置 None，前端显示 N/A，而非误显示 0
+        avg_tps = None
+        avg_lat = sum(r.total_latency_ms for r in successful) / len(successful) if successful else 0
+        best_model = ""
+        best_tps = None
+        best_base_url = ""
+
     return BatchSummary(
         total_tests=len(parsed),
         successful=len(successful),
         failed=len(parsed) - len(successful),
-        avg_tps=round(avg_tps, 2),
+        avg_tps=round(avg_tps, 2) if avg_tps is not None else None,
         avg_latency_ms=round(avg_lat, 2),
-        best_model=best.model if best else "",
-        best_tps=best.tps if best else 0,
+        best_model=best_model,
+        best_tps=round(best_tps, 2) if best_tps is not None else None,
+        best_base_url=best_base_url,
     )
 
 
@@ -400,4 +450,53 @@ async def run_schedule_now(schedule_id: str):
     return _schedule_response(s)
 
 
-# ── Connection ─────────────────────────────────────────────────
+# ── Settings（桌面）────────────────────────────────────────────
+
+
+class AutostartSettings(BaseModel):
+    supported: bool
+    enabled: bool
+
+
+@app.get("/api/settings/autostart", response_model=AutostartSettings)
+async def get_autostart():
+    return AutostartSettings(supported=autostart.supported(), enabled=autostart.is_enabled())
+
+
+class AutostartUpdate(BaseModel):
+    enabled: bool
+
+
+@app.put("/api/settings/autostart", response_model=AutostartSettings)
+async def set_autostart(req: AutostartUpdate):
+    if not autostart.supported():
+        return AutostartSettings(supported=False, enabled=False)
+    ok = autostart.set_enabled(req.enabled)
+    return AutostartSettings(supported=True, enabled=req.enabled if ok else autostart.is_enabled())
+
+
+@app.get("/api/settings/network", response_model=NetworkSettings)
+async def get_network():
+    return NetworkSettings(**net_settings.get_network_settings())
+
+
+@app.put("/api/settings/network", response_model=NetworkSettings)
+async def set_network(req: NetworkSettings):
+    try:
+        data = await net_settings.update_network_settings(req.model_dump())
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return NetworkSettings(**data)
+
+
+# ── 前端静态资源（桌面/已构建场景）─────────────────────────────
+# 放在所有 /api 路由之后，SPA 路由回落由 StaticFiles(html=True) 处理
+
+
+def mount_frontend() -> None:
+    if not paths.frontend_dist_exists():
+        return
+    app.mount("/", StaticFiles(directory=paths.frontend_dist_dir(), html=True), name="frontend")
+
+
+mount_frontend()

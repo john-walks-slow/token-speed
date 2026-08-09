@@ -1,11 +1,12 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Literal, Optional
 from datetime import datetime
 
 
 class ConnectRequest(BaseModel):
     base_url: str
     api_key: str = ""
+    protocol: str = "openai"
 
 
 class ModelInfo(BaseModel):
@@ -28,6 +29,7 @@ class SpeedTestRequest(BaseModel):
     temperature: float = 0.7
     stream: bool = False
     disable_reasoning: bool = False
+    protocol: str = "openai"
 
 
 class BatchSpeedTestItem(BaseModel):
@@ -36,6 +38,7 @@ class BatchSpeedTestItem(BaseModel):
     api_key: str = ""
     provider_id: str = ""
     provider_name: str = ""
+    protocol: str = "openai"
 
 
 class BatchSpeedTestRequest(BaseModel):
@@ -67,10 +70,22 @@ class SpeedTestResult(BaseModel):
     tokens_generated: int
     reasoning_tokens: int = 0
     content_tokens: int = 0
-    tps: float
+    thinking_ms: Optional[float] = None
+    tps: Optional[float] = None
     success: bool
     error_message: Optional[str] = None
     created_at: str = ""
+
+
+class BatchSummary(BaseModel):
+    total_tests: int
+    successful: int
+    failed: int
+    avg_tps: Optional[float] = None  # None = 无速度样本（如全 non-stream）
+    avg_latency_ms: float
+    best_model: str = ""
+    best_tps: Optional[float] = None
+    best_base_url: str = ""  # 同 model 多 provider 时用于精确匹配
 
 
 class SpeedTestHistory(BaseModel):
@@ -87,7 +102,8 @@ class SpeedTestHistory(BaseModel):
     tokens_generated: int
     reasoning_tokens: int = 0
     content_tokens: int = 0
-    tps: float
+    thinking_ms: Optional[float] = None
+    tps: Optional[float] = None
     success: bool
     created_at: str
     schedule_id: Optional[str] = None
@@ -110,6 +126,7 @@ class ProviderCreate(BaseModel):
     name: str
     base_url: str
     api_key: str = ""
+    protocol: Literal["openai", "anthropic"] = "openai"
     models: list[str] = []
 
 
@@ -117,6 +134,7 @@ class ProviderUpdate(BaseModel):
     name: str
     base_url: str
     api_key: str = ""
+    protocol: Literal["openai", "anthropic"] = "openai"
     models: list[str] | None = None
 
 
@@ -129,6 +147,7 @@ class ProviderResponse(BaseModel):
     name: str
     base_url: str
     api_key: str = ""
+    protocol: Literal["openai", "anthropic"] = "openai"
     models: list[str] = []
     created_at: str = ""
     updated_at: str = ""
@@ -136,6 +155,15 @@ class ProviderResponse(BaseModel):
 
 class ProviderListResponse(BaseModel):
     providers: list[ProviderResponse]
+
+
+# ── Network Settings ───────────────────────────────────────────
+
+
+class NetworkSettings(BaseModel):
+    proxy_mode: Literal["system", "custom", "none"] = "system"
+    custom_proxy: str = ""
+    verify_ssl: bool = True
 
 
 # ── Schedule ───────────────────────────────────────────────────

@@ -10,6 +10,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Build artifacts
+build/
+
 # Database
 *.db
 *.sqlite3

@@ -6,16 +6,10 @@ import { getHistory, deleteHistoryItem, clearHistory, getSchedules } from "@/lib
 import type { Provider, TestHistory } from "@/types";
 import { modelDisplayLabel } from "@/lib/modelLabel";
 import ResponseContentView from "@/components/ResponseContentView";
+import ErrorMessageView from "@/components/ErrorMessageView";
+import TimeRangeFilter from "@/components/TimeRangeFilter";
+import { filterTestsByRange, type TimeRangeValue } from "@/lib/timeRange";
 import { History, Trash2, X, CheckCircle2, XCircle, Loader2 } from "lucide-react";
-
-type TimeRange = "today" | "7d" | "30d" | "all";
-
-const TIME_RANGE_LABELS: Record<TimeRange, string> = {
-  today: "今天",
-  "7d": "近7天",
-  "30d": "近30天",
-  all: "全部",
-};
 
 interface Props {
   refreshKey: number;
@@ -26,7 +20,7 @@ export default function HistoryList({ refreshKey, providers }: Props) {
   const [tests, setTests] = useState<TestHistory[]>([]);
   const [scheduleNames, setScheduleNames] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
-  const [timeRange, setTimeRange] = useState<TimeRange>("all");
+  const [timeRange, setTimeRange] = useState<TimeRangeValue>({ type: "preset", key: "all" });
 
   const fetchHistory = async () => {
     setLoading(true);
@@ -50,24 +44,10 @@ export default function HistoryList({ refreshKey, providers }: Props) {
     setTests((prev) => prev.filter((t) => t.id !== id));
   };
 
-  const filteredTests = useMemo(() => {
-    if (timeRange === "all") return tests;
-    const now = Date.now();
-    const msMap: Record<TimeRange, number> = {
-      today: 86400000,
-      "7d": 7 * 86400000,
-      "30d": 30 * 86400000,
-      all: Infinity,
-    };
-    // "今天" 按自然日过滤，其余按滚动时间窗口
-    if (timeRange === "today") {
-      const startOfDay = new Date();
-      startOfDay.setHours(0, 0, 0, 0);
-      return tests.filter((t) => new Date(t.created_at).getTime() >= startOfDay.getTime());
-    }
-    const cutoff = now - msMap[timeRange];
-    return tests.filter((t) => new Date(t.created_at).getTime() >= cutoff);
-  }, [tests, timeRange]);
+  const filteredTests = useMemo(
+    () => filterTestsByRange(tests, timeRange),
+    [tests, timeRange]
+  );
 
   const handleClear = async () => {
     if (!confirm("确定清空所有历史记录？")) return;
@@ -95,23 +75,11 @@ export default function HistoryList({ refreshKey, providers }: Props) {
 
       {/* 日期过滤 */}
       {tests.length > 0 && (
-        <div className="flex gap-1">
-          {(Object.keys(TIME_RANGE_LABELS) as TimeRange[]).map((tr) => (
-            <button
-              key={tr}
-              type="button"
-              onClick={() => setTimeRange(tr)}
-              className="cursor-pointer"
-            >
-              <Badge
-                variant={timeRange === tr ? "default" : "outline"}
-                className="text-[10px] px-1.5 py-0"
-              >
-                {TIME_RANGE_LABELS[tr]}
-              </Badge>
-            </button>
-          ))}
-        </div>
+        <TimeRangeFilter
+          value={timeRange}
+          onChange={setTimeRange}
+          presets={["today", "7d", "30d", "all"]}
+        />
       )}
 
       {loading ? (
@@ -148,7 +116,8 @@ export default function HistoryList({ refreshKey, providers }: Props) {
                   </div>
                   <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
                     <ResponseContentView content={t.response_content} />
-                    <span className="tabular-nums">{t.tps} TPS</span>
+                    {!t.success && <ErrorMessageView message={t.error_message} />}
+                    <span className="tabular-nums">{t.tps !== null ? `${t.tps} tok/s` : "N/A"}</span>
                     <span className="tabular-nums">{t.total_latency_ms}ms</span>
                     <button
                       title="删除"

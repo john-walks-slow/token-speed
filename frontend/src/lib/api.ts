@@ -10,6 +10,8 @@ import type {
   Schedule,
   ScheduleCreate,
   ScheduleUpdate,
+  AutostartSettings,
+  NetworkSettings,
 } from "../types";
 
 const BASE = "/api";
@@ -250,4 +252,32 @@ export async function toggleSchedule(
 
 export async function runScheduleNow(id: string): Promise<Schedule> {
   return request(`/schedules/${id}/run`, { method: "POST" });
+}
+
+// ── Settings API ──────────────────────────────────────────────
+
+export async function getAutostart(): Promise<AutostartSettings> {
+  return request("/settings/autostart");
+}
+
+export async function setAutostart(enabled: boolean): Promise<AutostartSettings> {
+  return request("/settings/autostart", {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+// ── Network Settings API ─────────────────────────────────────
+
+export async function getNetworkSettings(): Promise<NetworkSettings> {
+  return request("/settings/network");
+}
+
+export async function setNetworkSettings(
+  data: NetworkSettings
+): Promise<NetworkSettings> {
+  return request("/settings/network", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
 }

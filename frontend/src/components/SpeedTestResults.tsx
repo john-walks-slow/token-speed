@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import type { Provider, SpeedTestResult, BatchSummary } from "@/types";
 import { modelDisplayLabel } from "@/lib/modelLabel";
 import ResponseContentView from "@/components/ResponseContentView";
+import ErrorMessageView from "@/components/ErrorMessageView";
 import {
   Gauge,
   Clock,
@@ -54,7 +55,11 @@ export default function SpeedTestResults({ results, summary, providers }: Props)
   if (results.length === 0) return null;
 
   const successResults = results.filter((r) => r.success);
-  const bestResult = successResults.find((r) => r.model === summary?.best_model);
+  const bestResult = successResults.find(
+    (r) =>
+      r.model === summary?.best_model &&
+      (!summary?.best_base_url || r.base_url === summary.best_base_url)
+  );
 
   if (summary) {
     return (
@@ -70,13 +75,14 @@ export default function SpeedTestResults({ results, summary, providers }: Props)
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <MetricCard
             icon={<Gauge className="w-4 h-4" />}
-            label="平均 TPS"
-            value={summary.avg_tps}
+            label="中位生成速度"
+            value={summary.avg_tps !== null ? summary.avg_tps : "N/A"}
+            unit={summary.avg_tps !== null ? "tok/s" : ""}
             color="text-primary"
           />
           <MetricCard
             icon={<Clock className="w-4 h-4" />}
-            label="平均延迟"
+            label="中位延迟"
             value={summary.avg_latency_ms}
             unit="ms"
             color="text-blue-400"
@@ -84,8 +90,8 @@ export default function SpeedTestResults({ results, summary, providers }: Props)
           <MetricCard
             icon={<Trophy className="w-4 h-4" />}
             label="最佳模型"
-            value={bestResult ? modelDisplayLabel(providers, bestResult) : summary.best_model}
-            unit={`${summary.best_tps} TPS`}
+            value={bestResult ? modelDisplayLabel(providers, bestResult) : summary.best_model || "N/A"}
+            unit={summary.best_tps !== null ? `${summary.best_tps} tok/s` : ""}
             color="text-emerald-400"
           />
         </div>
@@ -108,7 +114,7 @@ export default function SpeedTestResults({ results, summary, providers }: Props)
                         </Badge>
                       )}
                       <Badge variant="success" className="text-[10px] px-1.5">
-                        {r.tps} TPS
+                        {r.tps !== null ? `${r.tps} tok/s` : "N/A"}
                       </Badge>
                     </div>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
@@ -122,6 +128,9 @@ export default function SpeedTestResults({ results, summary, providers }: Props)
                           <Brain className="w-3 h-3 inline mr-0.5" />
                           {r.reasoning_tokens}+{r.content_tokens}
                         </span>
+                      )}
+                      {r.thinking_ms !== null && r.thinking_ms > 0 && (
+                        <span title="思考耗时">思考 {r.thinking_ms}ms</span>
                       )}
                       <span>{r.tokens_generated} tokens</span>
                     </div>
@@ -159,8 +168,9 @@ export default function SpeedTestResults({ results, summary, providers }: Props)
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <MetricCard
               icon={<Gauge className="w-4 h-4" />}
-              label="TPS"
-              value={r.tps}
+              label="生成速度"
+              value={r.tps !== null ? r.tps : "N/A"}
+              unit={r.tps !== null ? "tok/s" : ""}
               color="text-primary"
             />
             <MetricCard
@@ -206,11 +216,25 @@ export default function SpeedTestResults({ results, summary, providers }: Props)
                   color="text-blue-400"
                 />
               )}
+              {r.thinking_ms !== null && r.thinking_ms > 0 && (
+                <MetricCard
+                  icon={<Brain className="w-4 h-4" />}
+                  label="思考耗时"
+                  value={r.thinking_ms}
+                  unit="ms"
+                  color="text-purple-400"
+                />
+              )}
             </div>
           )}
         </>
       ) : (
-        <p className="text-sm text-destructive">{r.error_message}</p>
+        <div className="flex items-center gap-2 text-sm text-destructive">
+          <span className="truncate">
+            {r.error_message || "测速失败"}
+          </span>
+          <ErrorMessageView message={r.error_message} />
+        </div>
       )}
     </div>
   );

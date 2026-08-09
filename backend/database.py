@@ -1,11 +1,38 @@
 import sqlite3
 import threading
+import shutil
 import os
 import uuid
 import json
 from datetime import datetime, timezone
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "speed_tests.db")
+import sys
+
+from .paths import is_frozen, db_path as _default_db_path
+
+
+def _resolve_db_path() -> str:
+    """frozen(exe) 用 %APPDATA% 数据目录，否则保持 backend/speed_tests.db。
+    桌面首启时若 exe 旁的旧库存在且新位置无库，复制迁移以保留数据。
+    """
+    path = _default_db_path()
+    if is_frozen():
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        for old in (
+            os.path.join(exe_dir, "speed_tests.db"),
+            os.path.join(exe_dir, "backend", "speed_tests.db"),
+        ):
+            if os.path.isfile(old) and not os.path.isfile(path):
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                try:
+                    shutil.copy2(old, path)
+                except OSError:
+                    pass
+                break
+    return path
+
+
+DB_PATH = _resolve_db_path()
 
 _local = threading.local()
 
@@ -34,9 +61,14 @@ def _get_conn():
             name        TEXT NOT NULL,
             base_url    TEXT NOT NULL,
             api_key     TEXT DEFAULT '',
+            protocol    TEXT DEFAULT 'openai',
             models_json TEXT DEFAULT '[]',
             created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+        _local.conn.execute("""CREATE TABLE IF NOT EXISTS settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT
         )""")
         _local.conn.execute("""CREATE TABLE IF NOT EXISTS schedules (
             id               TEXT PRIMARY KEY,
@@ -64,6 +96,7 @@ def _get_conn():
             "content_ttft_ms REAL",
             "reasoning_tokens INTEGER DEFAULT 0",
             "content_tokens INTEGER DEFAULT 0",
+            "thinking_ms REAL",
             "schedule_id TEXT",
             "provider_id TEXT",
             "provider_name TEXT",
@@ -76,6 +109,10 @@ def _get_conn():
                 pass  # column already exists
         try:
             _local.conn.execute("ALTER TABLE providers ADD COLUMN models_json TEXT DEFAULT '[]'")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+        try:
+            _local.conn.execute("ALTER TABLE providers ADD COLUMN protocol TEXT DEFAULT 'openai'")
         except sqlite3.OperationalError:
             pass  # column already exists
         for col_def in [
@@ -109,15 +146,27 @@ def _fetchone(sql, params=None):
     return dict(row) if row else None
 
 
+def _median(values: list[float]) -> float:
+    """P50。延迟/速度类指标在长尾下用 median 比 mean 稳定。"""
+    if not values:
+        return 0.0
+    s = sorted(values)
+    n = len(s)
+    mid = n // 2
+    if n % 2:
+        return s[mid]
+    return (s[mid - 1] + s[mid]) / 2
+
+
 async def insert_speed_test(result: dict, schedule_id: str | None = None) -> None:
     _run(
         """INSERT INTO speed_tests
            (id, base_url, model, actual_model, prompt, max_tokens, temperature,
             ttft_ms, content_ttft_ms, total_latency_ms, tokens_generated,
-            reasoning_tokens, content_tokens, tps,
+            reasoning_tokens, content_tokens, thinking_ms, tps,
             success, error_message, created_at, schedule_id,
             provider_id, provider_name, response_content)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             result["id"],
             result["base_url"],
@@ -132,7 +181,8 @@ async def insert_speed_test(result: dict, schedule_id: str | None = None) -> Non
             result["tokens_generated"],
             result.get("reasoning_tokens", 0),
             result.get("content_tokens", 0),
-            result["tps"],
+            result.get("thinking_ms"),
+            result.get("tps"),
             1 if result["success"] else 0,
             result.get("error_message"),
             result.get("created_at"),
@@ -185,24 +235,42 @@ async def get_stats() -> dict:
     stats = _fetchone(
         """SELECT
             CAST(SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) AS REAL) / COUNT(*) as success_rate,
-            AVG(tps) as avg_tps,
             AVG(total_latency_ms) as avg_latency_ms,
             AVG(CASE WHEN ttft_ms IS NOT NULL THEN ttft_ms ELSE NULL END) as avg_ttft_ms
         FROM speed_tests"""
     )
 
-    by_model = _fetchall(
-        """SELECT model, COUNT(*) as count, AVG(tps) as avg_tps, AVG(total_latency_ms) as avg_latency
-        FROM speed_tests WHERE success = 1
-        GROUP BY model ORDER BY count DESC"""
+    # 速度用 median(P50)（长尾分布下 mean 被慢样本拉偏），SQLite 无 median，取数后 Python 算
+    tps_rows = _fetchall(
+        "SELECT tps FROM speed_tests WHERE success = 1 AND tps IS NOT NULL"
     )
+    tps_vals = [r["tps"] for r in tps_rows]
+    median_tps = _median(tps_vals) if tps_vals else None
+
+    # 按 model 分组的 median tps / median latency（成功样本）
+    model_rows = _fetchall(
+        """SELECT model, tps, total_latency_ms
+        FROM speed_tests WHERE success = 1"""
+    )
+    by_model_group: dict[str, list[tuple[float | None, float]]] = {}
+    for r in model_rows:
+        by_model_group.setdefault(r["model"], []).append((r["tps"], r["total_latency_ms"]))
+    by_model = []
+    for m, vals in sorted(by_model_group.items(), key=lambda kv: -len(kv[1])):
+        tps_vals = [v[0] for v in vals if v[0] is not None]
+        by_model.append({
+            "model": m,
+            "count": len(vals),  # 成功样本数（含无速度样本）
+            "avg_tps": round(_median(tps_vals), 2) if tps_vals else 0,
+            "avg_latency": round(_median([v[1] for v in vals]), 2),
+        })
 
     recent = _fetchall("SELECT * FROM speed_tests ORDER BY created_at DESC LIMIT 10")
 
     return {
         "total_tests": total,
         "success_rate": round(stats["success_rate"] * 100, 1) if stats["success_rate"] else 0,
-        "avg_tps": round(stats["avg_tps"], 2) if stats["avg_tps"] else 0,
+        "avg_tps": round(median_tps, 2) if median_tps is not None else 0,
         "avg_latency_ms": round(stats["avg_latency_ms"], 2) if stats["avg_latency_ms"] else 0,
         "avg_ttft_ms": round(stats["avg_ttft_ms"], 2) if stats.get("avg_ttft_ms") else None,
         "tests_by_model": by_model,
@@ -213,12 +281,24 @@ async def get_stats() -> dict:
 # ── Provider CRUD ──────────────────────────────────────────────
 
 
+def _dedupe_models(models: list[str]) -> list[str]:
+    """按顺序去重，保留首个出现。"""
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in models:
+        if m not in seen:
+            seen.add(m)
+            out.append(m)
+    return out
+
+
 def _enrich_provider(row: dict) -> dict:
     d = dict(row)
     try:
-        d["models"] = json.loads(d.get("models_json", "[]"))
+        d["models"] = _dedupe_models(json.loads(d.get("models_json", "[]")))
     except (json.JSONDecodeError, TypeError):
         d["models"] = []
+    d["protocol"] = d.get("protocol") or "openai"
     return d
 
 
@@ -237,6 +317,7 @@ async def save_provider_models(provider_id: str, models: list[str]) -> dict | No
     if not existing:
         return None
     now = datetime.now(timezone.utc).isoformat()
+    models = _dedupe_models(models)
     _run(
         "UPDATE providers SET models_json=?, updated_at=? WHERE id=?",
         (json.dumps(models), now, provider_id),
@@ -244,28 +325,32 @@ async def save_provider_models(provider_id: str, models: list[str]) -> dict | No
     return {**existing, "models": models, "updated_at": now}
 
 
-async def create_provider(name: str, base_url: str, api_key: str, models: list[str] | None = None) -> dict:
+async def create_provider(name: str, base_url: str, api_key: str, models: list[str] | None = None, protocol: str = "openai") -> dict:
     pid = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    models_str = json.dumps(models or [])
+    models = _dedupe_models(models or [])
+    models_str = json.dumps(models)
     _run(
-        "INSERT INTO providers (id, name, base_url, api_key, models_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (pid, name, base_url, api_key, models_str, now, now),
+        "INSERT INTO providers (id, name, base_url, api_key, protocol, models_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (pid, name, base_url, api_key, protocol, models_str, now, now),
     )
-    return {"id": pid, "name": name, "base_url": base_url, "api_key": api_key, "models": models or [], "created_at": now, "updated_at": now}
+    return {"id": pid, "name": name, "base_url": base_url, "api_key": api_key, "protocol": protocol, "models": models, "created_at": now, "updated_at": now}
 
 
-async def update_provider(provider_id: str, name: str, base_url: str, api_key: str, models: list[str] | None = None) -> dict | None:
+async def update_provider(provider_id: str, name: str, base_url: str, api_key: str, models: list[str] | None = None, protocol: str | None = None) -> dict | None:
     existing = await get_provider(provider_id)
     if not existing:
         return None
     now = datetime.now(timezone.utc).isoformat()
+    if models is not None:
+        models = _dedupe_models(models)
     models_str = json.dumps(models) if models is not None else existing.get("models_json", "[]")
+    protocol = protocol or existing.get("protocol") or "openai"
     _run(
-        "UPDATE providers SET name=?, base_url=?, api_key=?, models_json=?, updated_at=? WHERE id=?",
-        (name, base_url, api_key, models_str, now, provider_id),
+        "UPDATE providers SET name=?, base_url=?, api_key=?, protocol=?, models_json=?, updated_at=? WHERE id=?",
+        (name, base_url, api_key, protocol, models_str, now, provider_id),
     )
-    return {**existing, "name": name, "base_url": base_url, "api_key": api_key, "models": json.loads(models_str), "updated_at": now}
+    return {**existing, "name": name, "base_url": base_url, "api_key": api_key, "protocol": protocol, "models": json.loads(models_str), "updated_at": now}
 
 
 async def delete_provider(provider_id: str) -> bool:

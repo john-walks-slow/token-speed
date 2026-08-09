@@ -13,6 +13,8 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import ModelSelector, { type ModelGroup } from "@/components/ModelSelector";
+import TimeRangeFilter from "@/components/TimeRangeFilter";
+import { filterTestsByRange, PRESET_LABELS, type TimeRangeValue } from "@/lib/timeRange";
 import {
   modelDisplayLabel,
   recordKey,
@@ -35,21 +37,20 @@ import {
 } from "recharts";
 
 type Metric = "tps" | "total_latency_ms" | "ttft_ms";
-type TimeRange = "1h" | "24h" | "7d" | "30d" | "all";
 
 const METRIC_LABELS: Record<Metric, string> = {
-  tps: "TPS",
+  tps: "生成速度(tok/s)",
   total_latency_ms: "延迟(ms)",
   ttft_ms: "TTFT(ms)",
 };
 
-const TIME_RANGE_LABELS: Record<TimeRange, string> = {
-  "1h": "1小时",
-  "24h": "24小时",
-  "7d": "7天",
-  "30d": "30天",
-  "all": "全部",
-};
+/** median(P50)：长尾分布下比 mean 稳定。 */
+function median(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  const s = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
 
 const MODEL_COLORS = [
   "oklch(0.922 0.176 149.238)",   // green
@@ -66,13 +67,28 @@ function getModelColor(idx: number) {
   return MODEL_COLORS[idx % MODEL_COLORS.length];
 }
 
-function formatTime(ts: number, range: TimeRange) {
+function rangeLabel(range: TimeRangeValue): string {
+  if (range.type === "preset") return PRESET_LABELS[range.key];
+  return `${range.from} ~ ${range.to}`;
+}
+
+function formatTime(ts: number, range: TimeRangeValue) {
   const d = new Date(ts);
-  if (range === "1h") return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  if (range === "24h") return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  if (range === "7d") return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, "0")}:00`;
-  if (range === "30d") return `${d.getMonth() + 1}/${d.getDate()}`;
-  return `${d.getFullYear()}/${d.getMonth() + 1}`;
+  if (range.type === "preset") {
+    switch (range.key) {
+      case "1h":
+      case "24h":
+        return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      case "7d":
+        return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, "0")}:00`;
+      case "30d":
+        return `${d.getMonth() + 1}/${d.getDate()}`;
+      default:
+        return `${d.getFullYear()}/${d.getMonth() + 1}`;
+    }
+  }
+  // custom：按天刻度
+  return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
 interface Props {
@@ -87,7 +103,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
 
   // Filters
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
-  const [timeRange, setTimeRange] = useState<TimeRange>("all");
+  const [timeRange, setTimeRange] = useState<TimeRangeValue>({ type: "preset", key: "all" });
   const [metric, setMetric] = useState<Metric>("tps");
   const [lastUpdated, setLastUpdated] = useState("");
 
@@ -104,7 +120,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
       // 默认全选所有出现过数据的 (provider, model) 对（含失败）
       setSelectedKeys((prev) => {
         if (prev.size > 0) return prev;
-        return new Set(sorted.map((t) => recordKey(t)));
+        return new Set(sorted.map((t) => recordKey(providers, t)));
       });
       setLastUpdated(new Date().toLocaleTimeString());
     } catch {
@@ -122,13 +138,13 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
 
   // 所有出现过的 (provider, model) 对，按 (provider名, model) 排序，颜色取 index
   const pairKeys = useMemo(() => {
-    const keys = new Set(allTests.map((t) => recordKey(t)));
+    const keys = new Set(allTests.map((t) => recordKey(providers, t)));
     return [...keys].sort((a, b) => {
       const [pa, ma] = a.split("|");
       const [pb, mb] = b.split("|");
       return pa.localeCompare(pb) || ma.localeCompare(mb);
     });
-  }, [allTests]);
+  }, [allTests, providers]);
 
   const pairIndex = useMemo(() => {
     const m = new Map<string, number>();
@@ -142,7 +158,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
   const labelForPair = useMemo(() => {
     const repByKey = new Map<string, TestHistory>();
     for (const t of allTests) {
-      const k = recordKey(t);
+      const k = recordKey(providers, t);
       if (!repByKey.has(k)) repByKey.set(k, t);
     }
     return (key: string) => {
@@ -153,59 +169,63 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
     };
   }, [allTests, providers]);
 
-  // 选择器分组：目录 provider + 幽灵组（历史记录里不在目录的 provider）
+  // 过滤：时间范围 + 选中的对
+  const timeFiltered = useMemo(
+    () => filterTestsByRange(allTests, timeRange),
+    [allTests, timeRange]
+  );
+
+  // 选择器分组：目录 provider + 幽灵组；仅保留当前时间范围内有数据的模型
   const groups: ModelGroup[] = useMemo(() => {
-    const result: ModelGroup[] = providers.map((p) => ({ id: p.id, name: p.name, models: p.models || [] }));
+    const modelsInRange = new Set(timeFiltered.map((t) => t.model));
+    // 每个记录归属的 provider key 及其历史模型
+    const modelsByProvider = new Map<string, Set<string>>();
+    for (const t of timeFiltered) {
+      const pk = recordProviderKey(providers, t);
+      if (!modelsByProvider.has(pk)) modelsByProvider.set(pk, new Set());
+      modelsByProvider.get(pk)!.add(t.model);
+    }
+    const result: ModelGroup[] = providers.map((p) => ({
+      id: p.id,
+      name: p.name,
+      models: [...new Set([...(p.models || []), ...(modelsByProvider.get(p.id) ?? [])])].filter(
+        (m) => modelsInRange.has(m)
+      ),
+    }));
     const existing = new Set(result.map((g) => g.id));
     const ghostByKey = new Map<string, { models: string[]; rep: TestHistory }>();
-    allTests.forEach((t) => {
-      const pk = recordProviderKey(t);
-      if (existing.has(pk)) return;
-      if (!ghostByKey.has(pk)) ghostByKey.set(pk, { models: [], rep: t });
+    for (const [pk, models] of modelsByProvider) {
+      if (existing.has(pk)) continue;
+      if (!ghostByKey.has(pk)) {
+        const rep = allTests.find((t) => recordProviderKey(providers, t) === pk)!;
+        ghostByKey.set(pk, { models: [], rep });
+      }
       const entry = ghostByKey.get(pk)!;
-      if (!entry.models.includes(t.model)) entry.models.push(t.model);
-    });
+      for (const m of models) if (!entry.models.includes(m)) entry.models.push(m);
+    }
     for (const [pk, { models, rep }] of ghostByKey) {
-      result.push({
-        id: pk,
-        name: resolveProviderName(providers, rep),
-        models,
-      });
+      result.push({ id: pk, name: resolveProviderName(providers, rep), models });
     }
     return result;
-  }, [providers, allTests]);
-
-  // 过滤：时间范围 + 选中的对
-  const timeFiltered = useMemo(() => {
-    if (timeRange === "all") return allTests;
-    const now = Date.now();
-    const msMap: Record<TimeRange, number> = {
-      "1h": 3600000,
-      "24h": 86400000,
-      "7d": 604800000,
-      "30d": 2592000000,
-      "all": Infinity,
-    };
-    const cutoff = now - msMap[timeRange];
-    return allTests.filter(t => new Date(t.created_at).getTime() >= cutoff);
-  }, [allTests, timeRange]);
+  }, [providers, allTests, timeFiltered]);
 
   const filteredTests = useMemo(() => {
     // 空选择（用户清空筛选）→ 不展示任何数据；默认全选在 fetchData 里填充
     if (selectedKeys.size === 0) return [];
-    return timeFiltered.filter(t => selectedKeys.has(recordKey(t)));
-  }, [timeFiltered, selectedKeys]);
+    return timeFiltered.filter(t => selectedKeys.has(recordKey(providers, t)));
+  }, [timeFiltered, selectedKeys, providers]);
 
   // Stats cards
   const cardStats = useMemo(() => {
     const success = filteredTests.filter(t => t.success);
     const total = filteredTests.length;
     if (total === 0) return null;
+    const tpsVals = success.filter(t => t.tps !== null).map(t => t.tps as number);
     return {
       total,
       successRate: total > 0 ? Math.round((success.length / total) * 100) : 0,
-      avgTps: success.length > 0 ? success.reduce((s, t) => s + t.tps, 0) / success.length : 0,
-      avgLatency: success.length > 0 ? success.reduce((s, t) => s + t.total_latency_ms, 0) / success.length : 0,
+      avgTps: tpsVals.length > 0 ? median(tpsVals) : null,
+      avgLatency: success.length > 0 ? median(success.map(t => t.total_latency_ms)) : 0,
     };
   }, [filteredTests]);
 
@@ -215,7 +235,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
     filteredTests.filter(t => t.success).forEach(t => {
       const v = t[metric];
       if (v === null || v === undefined) return; // TTFT 对 non-stream 为 null，跳过
-      const k = recordKey(t);
+      const k = recordKey(providers, t);
       if (!byPair[k]) byPair[k] = [];
       byPair[k].push({
         time: new Date(t.created_at).getTime(),
@@ -224,7 +244,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
     });
     Object.values(byPair).forEach(arr => arr.sort((a, b) => a.time - b.time));
     return byPair;
-  }, [filteredTests, metric]);
+  }, [filteredTests, metric, providers]);
 
   const pairsWithData = Object.keys(timeSeriesByPair);
   const showSmallMultiples = pairsWithData.length > 1;
@@ -233,32 +253,31 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
     1
   );
 
-  // 模型对比：按对
+  // 模型对比：按对，组内取 median(P50)
   const modelComparison = useMemo(() => {
-    const byPair: Record<string, { sum: number; count: number }> = {};
+    const byPair: Record<string, number[]> = {};
     filteredTests.filter(t => t.success).forEach(t => {
       const v = t[metric];
-      if (v === null || v === undefined) return; // TTFT 对 non-stream 为 null，跳过
-      const k = recordKey(t);
-      if (!byPair[k]) byPair[k] = { sum: 0, count: 0 };
-      byPair[k].sum += v;
-      byPair[k].count += 1;
+      if (v === null || v === undefined) return; // TTFT/生成速度对 non-stream 为 null，跳过
+      const k = recordKey(providers, t);
+      if (!byPair[k]) byPair[k] = [];
+      byPair[k].push(v);
     });
     return Object.entries(byPair)
-      .map(([key, data]) => ({
+      .map(([key, vals]) => ({
         key,
         name: labelForPair(key),
-        value: data.count > 0 ? Math.round((data.sum / data.count) * 100) / 100 : 0,
-        count: data.count,
+        value: Math.round(median(vals) * 100) / 100,
+        count: vals.length,
       }))
       .sort((a, b) => b.value - a.value);
-  }, [filteredTests, metric, labelForPair]);
+  }, [filteredTests, metric, labelForPair, providers]);
 
   // 成功率：按对，含失败
   const successRateData = useMemo(() => {
     const byPair: Record<string, { total: number; success: number }> = {};
     filteredTests.forEach(t => {
-      const k = recordKey(t);
+      const k = recordKey(providers, t);
       if (!byPair[k]) byPair[k] = { total: 0, success: 0 };
       byPair[k].total += 1;
       if (t.success) byPair[k].success += 1;
@@ -272,7 +291,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
         rate: d.total > 0 ? Math.round((d.success / d.total) * 1000) / 10 : 0,
       }))
       .sort((a, b) => a.rate - b.rate);
-  }, [filteredTests, labelForPair]);
+  }, [filteredTests, labelForPair, providers]);
 
   // 目录变化时清除已不存在的选中对（幽灵残留）
   useEffect(() => {
@@ -362,26 +381,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
         </div>
 
         {/* Time range selector */}
-        <div className="space-y-1.5">
-          <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">时间</span>
-          <div className="flex gap-1">
-            {(Object.keys(TIME_RANGE_LABELS) as TimeRange[]).map(tr => (
-              <button
-                key={tr}
-                type="button"
-                onClick={() => setTimeRange(tr)}
-                className="cursor-pointer"
-              >
-                <Badge
-                  variant={timeRange === tr ? "default" : "outline"}
-                  className="text-[10px] px-1.5 py-0"
-                >
-                  {TIME_RANGE_LABELS[tr]}
-                </Badge>
-              </button>
-            ))}
-          </div>
-        </div>
+        <TimeRangeFilter value={timeRange} onChange={setTimeRange} />
 
         {/* Metric selector */}
         <div className="space-y-1.5">
@@ -411,80 +411,12 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <MetricCard label="测试次数" value={cardStats.total} />
           <MetricCard label="成功率" value={`${cardStats.successRate}%`} />
-          <MetricCard label="平均 TPS" value={Math.round(cardStats.avgTps * 100) / 100} />
-          <MetricCard label="平均延迟" value={`${Math.round(cardStats.avgLatency)}ms`} />
+          <MetricCard
+            label="中位生成速度"
+            value={cardStats.avgTps !== null ? Math.round(cardStats.avgTps * 100) / 100 : "N/A"}
+          />
+          <MetricCard label="中位延迟" value={`${Math.round(cardStats.avgLatency)}ms`} />
         </div>
-      )}
-
-      {/* ── 成功率（含失败样本）── */}
-      {successRateData.length > 0 && (
-        <>
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-3.5 h-3.5 text-primary" />
-            <span className="text-xs font-medium">成功率（成功/全部）</span>
-            {timeRange !== "all" && (
-              <span className="text-[10px] text-muted-foreground">
-                最近 {TIME_RANGE_LABELS[timeRange]}
-              </span>
-            )}
-          </div>
-          <Card className="border-0 bg-card/50">
-            <CardContent className="p-4">
-              <ResponsiveContainer width="100%" height={Math.max(140, successRateData.length * 32)}>
-                <BarChart
-                  data={successRateData}
-                  layout="vertical"
-                  margin={{ left: 16, right: 56, top: 4, bottom: 4 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.269 0 0)" horizontal={false} />
-                  <XAxis
-                    type="number"
-                    domain={[0, 100]}
-                    tickFormatter={(v) => `${v}%`}
-                    stroke="oklch(0.708 0 0)"
-                    fontSize={11}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    width={140}
-                    tick={{ fill: "oklch(0.708 0 0)", fontSize: 11 }}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      background: "oklch(0.205 0 0)",
-                      border: "1px solid oklch(0.269 0 0)",
-                      borderRadius: "8px",
-                      fontSize: "12px",
-                    }}
-                    formatter={(val: number, _name, entry) => {
-                      const d = entry.payload as { success: number; total: number };
-                      return [`${val}% (${d.success}/${d.total})`, "成功率"];
-                    }}
-                  />
-                  <Bar dataKey="rate" radius={[0, 4, 4, 0]} animationDuration={600}>
-                    {successRateData.map((d) => (
-                      <Cell key={d.key} fill={pairColor(d.key)} />
-                    ))}
-                    <LabelList
-                      dataKey="rate"
-                      position="right"
-                      formatter={(v: number, entry?: { payload?: { success?: number; total?: number } }) => {
-                        const p = entry?.payload;
-                        return `${v}% (${p?.success ?? 0}/${p?.total ?? 0})`;
-                      }}
-                      style={{ fill: "oklch(0.708 0 0)", fontSize: 11 }}
-                    />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        </>
       )}
 
       {/* ── Model Comparison Bar ── */}
@@ -511,8 +443,6 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
                   <YAxis stroke="oklch(0.708 0 0)" fontSize={11} tickLine={false} axisLine={false} />
                   <Tooltip
                     contentStyle={{
-                      background: "oklch(0.205 0 0)",
-                      border: "1px solid oklch(0.269 0 0)",
                       borderRadius: "8px",
                       fontSize: "12px",
                     }}
@@ -542,9 +472,10 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
             <TrendingUp className="w-3.5 h-3.5 text-primary" />
             <span className="text-xs font-medium">
               {METRIC_LABELS[metric]} 趋势
-              {timeRange !== "all" && ` — 最近 ${TIME_RANGE_LABELS[timeRange]}`}
+              {(timeRange.type !== "preset" || timeRange.key !== "all") &&
+                ` — ${rangeLabel(timeRange)}`}
             </span>
-            {timeRange === "all" && pairsWithData.length === 1 && (
+            {timeRange.type === "preset" && timeRange.key === "all" && pairsWithData.length === 1 && (
               <span className="text-[10px] text-muted-foreground">
                 {timeSeriesByPair[pairsWithData[0]].length} 个数据点
               </span>
@@ -678,6 +609,75 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
               </CardContent>
             </Card>
           )}
+        </>
+      )}
+
+      {/* ── 成功率（含失败样本）── */}
+      {successRateData.length > 0 && (
+        <>
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-3.5 h-3.5 text-primary" />
+            <span className="text-xs font-medium">成功率（成功/全部）</span>
+            {(timeRange.type !== "preset" || timeRange.key !== "all") && (
+              <span className="text-[10px] text-muted-foreground">
+                {rangeLabel(timeRange)}
+              </span>
+            )}
+          </div>
+          <Card className="border-0 bg-card/50">
+            <CardContent className="p-4">
+              <ResponsiveContainer width="100%" height={Math.max(140, successRateData.length * 32)}>
+                <BarChart
+                  data={successRateData}
+                  layout="vertical"
+                  margin={{ left: 16, right: 56, top: 4, bottom: 4 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.269 0 0)" horizontal={false} />
+                  <XAxis
+                    type="number"
+                    domain={[0, 100]}
+                    tickFormatter={(v) => `${v}%`}
+                    stroke="oklch(0.708 0 0)"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis
+                    type="category"
+                    dataKey="name"
+                    width={140}
+                    tick={{ fill: "oklch(0.708 0 0)", fontSize: 11 }}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      borderRadius: "8px",
+                      fontSize: "12px",
+                    }}
+                    formatter={(val: number, _name, entry) => {
+                      const d = entry.payload as { success: number; total: number };
+                      return [`${val}% (${d.success}/${d.total})`, "成功率"];
+                    }}
+                  />
+                  <Bar dataKey="rate" radius={[0, 4, 4, 0]} animationDuration={600}>
+                    {successRateData.map((d) => (
+                      <Cell key={d.key} fill={pairColor(d.key)} />
+                    ))}
+                    <LabelList
+                      dataKey="rate"
+                      position="right"
+                      formatter={(v: number, entry?: { payload?: { success?: number; total?: number } }) => {
+                        const p = entry?.payload;
+                        return `${v}% (${p?.success ?? 0}/${p?.total ?? 0})`;
+                      }}
+                      style={{ fill: "oklch(0.708 0 0)", fontSize: 11 }}
+                    />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
         </>
       )}
     </div>

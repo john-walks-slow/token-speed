@@ -24,7 +24,9 @@ export default function ModelSelector({
   colorSelected,
   title = "选择测速模型",
 }: Props) {
-  const filtered = groups.filter((g) => g.models && g.models.length > 0);
+  const filtered = groups
+    .map((g) => ({ ...g, models: [...new Set(g.models)] }))
+    .filter((g) => g.models.length > 0);
   if (filtered.length === 0) {
     return (
       <div className="text-sm text-muted-foreground py-8 text-center">

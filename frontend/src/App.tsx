@@ -8,7 +8,9 @@ import SpeedTestResults from "@/components/SpeedTestResults";
 import HistoryList from "@/components/HistoryList";
 import StatsPanel from "@/components/StatsPanel";
 import SchedulePanel from "@/components/SchedulePanel";
+import SettingsPanel from "@/components/SettingsPanel";
 import { streamBatchSpeedTest, getProviders } from "@/lib/api";
+import { useHashRoute } from "@/lib/router";
 import type { Provider, SpeedTestResult, BatchSummary, SpeedTestItem } from "@/types";
 import {
   Gauge,
@@ -19,6 +21,7 @@ import {
   PanelLeftClose,
   FlaskConical,
   CalendarClock,
+  Settings,
 } from "lucide-react";
 
 export default function App() {
@@ -31,7 +34,9 @@ export default function App() {
   const [cancelled, setCancelled] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [tab, setTab] = useState("test");
+  const [route, navigate] = useHashRoute();
+  const tab = route;
+  const setTab = navigate;
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Load providers on mount
@@ -189,7 +194,8 @@ export default function App() {
               tokens_generated: 0,
               reasoning_tokens: 0,
               content_tokens: 0,
-              tps: 0,
+              thinking_ms: null,
+              tps: null,
               success: false,
               error_message: e instanceof Error ? e.message : "测试失败",
               created_at: new Date().toISOString(),
@@ -209,9 +215,9 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="h-screen bg-background flex flex-col overflow-hidden">
       {/* Header */}
-      <header className="border-b border-border/50 sticky top-0 z-30 bg-background/80 backdrop-blur-md">
+      <header className="border-b border-border/50 shrink-0 z-30 bg-background/80 backdrop-blur-md">
         <div className="max-w-screen-2xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button
@@ -233,20 +239,20 @@ export default function App() {
         </div>
       </header>
 
-      <div className="max-w-screen-2xl mx-auto flex">
+      <div className="flex-1 min-h-0 max-w-screen-2xl w-full mx-auto flex">
         {/* Sidebar — provider management */}
         <aside
-          className={`hidden lg:flex flex-col border-r border-border/50 h-[calc(100vh-57px)] sticky top-[57px] transition-all duration-200 overflow-hidden shrink-0 ${
+          className={`hidden lg:flex flex-col border-r border-border/50 h-full transition-all duration-200 overflow-hidden shrink-0 ${
             sidebarOpen ? "w-80" : "w-0 border-r-0"
           }`}
         >
-          <div className={`flex-1 overflow-y-auto p-4 ${sidebarOpen ? "block" : "hidden"}`}>
+          <div className={`flex-1 min-h-0 overflow-y-auto p-4 ${sidebarOpen ? "block" : "hidden"}`}>
             <ConnectionConfig onProvidersChange={handleProvidersChange} />
           </div>
         </aside>
 
-        {/* Main content */}
-        <main className="flex-1 min-w-0">
+        {/* Main content — 内容区滚动，body 不滚动 */}
+        <main className="flex-1 min-w-0 min-h-0 overflow-y-auto">
           {/* Mobile: provider panel at top */}
           <div className="lg:hidden p-4 border-b border-border/30">
             <ConnectionConfig onProvidersChange={handleProvidersChange} />
@@ -254,7 +260,7 @@ export default function App() {
 
           <div className="p-4 lg:p-6">
             <Tabs value={tab} onValueChange={setTab}>
-              <TabsList className="w-full sm:w-auto grid grid-cols-4 sm:inline-flex">
+              <TabsList className="w-full sm:w-auto grid grid-cols-5 sm:inline-flex">
                 <TabsTrigger value="test">
                   <Gauge className="w-3.5 h-3.5 mr-1.5" />
                   测速
@@ -270,6 +276,10 @@ export default function App() {
                 <TabsTrigger value="schedule">
                   <CalendarClock className="w-3.5 h-3.5 mr-1.5" />
                   定时
+                </TabsTrigger>
+                <TabsTrigger value="settings">
+                  <Settings className="w-3.5 h-3.5 mr-1.5" />
+                  设置
                 </TabsTrigger>
               </TabsList>
 
@@ -327,12 +337,16 @@ export default function App() {
               <TabsContent value="schedule">
                 <SchedulePanel providers={providers} />
               </TabsContent>
+
+              <TabsContent value="settings">
+                <SettingsPanel />
+              </TabsContent>
             </Tabs>
           </div>
         </main>
       </div>
 
-      <footer className="border-t border-border/50">
+      <footer className="border-t border-border/50 shrink-0">
         <div className="max-w-screen-2xl mx-auto px-4 py-3 text-center text-xs text-muted-foreground">
           Token Speed v1.0.0
         </div>

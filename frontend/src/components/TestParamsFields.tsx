@@ -15,7 +15,7 @@ export interface TestParamsValues {
 
 export const DEFAULT_PARAMS: TestParamsValues = {
   prompt: "Hello, tell me a short story in 3 sentences.",
-  maxTokens: 256,
+  maxTokens: 1024,
   temperature: 0.7,
   concurrency: 1,
   iterations: 1,
@@ -96,13 +96,23 @@ export default function TestParamsFields({ values, onChange, persist = true }: P
         </div>
       </div>
 
-      <label className="flex items-center gap-2 cursor-pointer">
-        <input type="checkbox" checked={values.stream} onChange={(e) => set({ stream: e.target.checked })} className="rounded border-input text-primary focus:ring-ring" />
-        <span className="text-sm text-muted-foreground">Streaming 模式</span>
-      </label>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" checked={values.stream} onChange={(e) => set({ stream: e.target.checked })} className="rounded border-input text-primary focus:ring-ring" />
+          <span className="text-sm text-muted-foreground">Streaming 模式</span>
+        </label>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="space-y-1.5">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={values.disableReasoning}
+            onChange={(e) => set({ disableReasoning: e.target.checked })}
+            className="rounded border-input text-primary focus:ring-ring"
+          />
+          <span className="text-sm text-muted-foreground">关闭思考（不支持该参数的端点可能报错）</span>
+        </label>
+
+        <div className="flex items-center gap-1.5">
           <label className="text-xs text-muted-foreground">每分钟最大请求</label>
           <Input
             type="number"
@@ -110,18 +120,14 @@ export default function TestParamsFields({ values, onChange, persist = true }: P
             value={values.maxRpm}
             title="按服务商分别限速，-1 表示不限速"
             onChange={(e) => set({ maxRpm: Number(e.target.value) })}
+            className="h-7 w-20 text-xs"
           />
         </div>
-        <label className="flex items-center gap-2 cursor-pointer col-span-2 sm:col-span-3">
-          <input
-            type="checkbox"
-            checked={values.disableReasoning}
-            onChange={(e) => set({ disableReasoning: e.target.checked })}
-            className="rounded border-input text-primary focus:ring-ring"
-          />
-          <span className="text-sm text-muted-foreground">关闭思考（尽量）</span>
-        </label>
       </div>
+
+      <p className="text-[11px] text-muted-foreground/80">
+        横评建议：各模型使用相同 max_tokens 与并发；迭代 ≥3 次时统计取中位数更稳。
+      </p>
     </>
   );
 }

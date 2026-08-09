@@ -5,6 +5,7 @@ import { XCircle } from "lucide-react";
 import type { Provider, SpeedTestResult } from "@/types";
 import { modelDisplayLabel } from "@/lib/modelLabel";
 import ResponseContentView from "@/components/ResponseContentView";
+import ErrorMessageView from "@/components/ErrorMessageView";
 
 interface Props {
   completed: number;
@@ -75,12 +76,15 @@ export default function SpeedTestProgress({ completed, total, results, cancelled
                   <ResponseContentView content={r.response_content} />
                   {r.success ? (
                     <>
-                      <span>{r.tps} TPS</span>
+                      <span>{r.tps !== null ? `${r.tps} tok/s` : "N/A"}</span>
                       <span>{r.total_latency_ms}ms</span>
                     </>
                   ) : (
-                    <span className="max-w-52 truncate text-destructive/80">
-                      {r.error_message}
+                    <span className="flex items-center gap-1.5 text-destructive/80">
+                      <span className="max-w-40 truncate">
+                        {r.error_message || "失败"}
+                      </span>
+                      <ErrorMessageView message={r.error_message} />
                     </span>
                   )}
                 </div>

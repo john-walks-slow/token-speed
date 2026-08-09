@@ -85,7 +85,10 @@ function TabsContent({
   return (
     <div
       role="tabpanel"
-      className={cn("mt-4 ring-offset-background", className)}
+      className={cn(
+        "mt-4 ring-offset-background min-h-[320px]",
+        className
+      )}
     >
       {children}
     </div>
