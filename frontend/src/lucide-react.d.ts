@@ -25,15 +25,18 @@ declare module "lucide-react" {
   export const FileText: Icon;
   export const FlaskConical: Icon;
   export const Gauge: Icon;
+  export const Globe: Icon;
   export const History: Icon;
   export const List: Icon;
   export const Loader2: Icon;
   export const PanelLeftClose: Icon;
   export const PanelLeftOpen: Icon;
+  export const Palette: Icon;
   export const Pause: Icon;
   export const Pencil: Icon;
   export const Play: Icon;
   export const Plug: Icon;
+  export const Power: Icon;
   export const PlugZap: Icon;
   export const Plus: Icon;
   export const Radio: Icon;

@@ -120,12 +120,14 @@ def test_run_schedule_success_updates_status_and_advances(db, monkeypatch):
 
     async def fake_execute(tests, prompt, max_tokens, temperature, stream,
                            concurrency, iterations, schedule_id=None,
-                           disable_reasoning=False, max_rpm=-1):
+                           max_rpm=-1, on_progress=None):
         captured["tests"] = tests
         captured["schedule_id"] = schedule_id
         captured["prompt"] = prompt
-        captured["disable_reasoning"] = disable_reasoning
         captured["max_rpm"] = max_rpm
+        # 模拟逐个完成，触发进度回调
+        for r in [{"success": True}, {"success": True}]:
+            await on_progress(r)
         return [{"success": True}, {"success": True}]
 
     monkeypatch.setattr("backend.scheduler.execute_batch_tests", fake_execute)
@@ -144,11 +146,14 @@ def test_run_schedule_success_updates_status_and_advances(db, monkeypatch):
     assert captured["schedule_id"] == s["id"]
     assert captured["prompt"] == "hi"
     # 新参数默认透传
-    assert captured["disable_reasoning"] is False
     assert captured["max_rpm"] == -1
 
     updated = asyncio.run(get_schedule(s["id"]))
     assert updated["last_run_status"] == "success"
+    # 进度计数：2 项全部完成、全部成功
+    assert updated["run_total"] == 2
+    assert updated["run_done"] == 2
+    assert updated["run_success"] == 2
     # next_run_at 推进到将来（防忙循环）
     assert datetime.fromisoformat(updated["next_run_at"]) > datetime.now(timezone.utc)
 

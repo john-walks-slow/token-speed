@@ -42,6 +42,7 @@ function buildMapFromTargets(
         api_key: p.api_key,
         provider_id: p.id,
         provider_name: p.name,
+        protocol: p.protocol,
       });
     }
   }
@@ -78,7 +79,6 @@ export default function ScheduleForm({ providers, editing, onSaved, onCancel }: 
         concurrency: editing.concurrency,
         iterations: editing.iterations,
         stream: editing.stream,
-        disableReasoning: editing.disable_reasoning,
         maxRpm: editing.max_rpm,
       });
       const { map, stale } = buildMapFromTargets(editing.targets, providers);
@@ -114,6 +114,7 @@ export default function ScheduleForm({ providers, editing, onSaved, onCancel }: 
             api_key: p.api_key,
             provider_id: p.id,
             provider_name: p.name,
+            protocol: p.protocol,
           });
         }
         return next;
@@ -137,6 +138,7 @@ export default function ScheduleForm({ providers, editing, onSaved, onCancel }: 
               api_key: p.api_key,
               provider_id: p.id,
               provider_name: p.name,
+              protocol: p.protocol,
             });
           } else {
             next.delete(key);
@@ -172,7 +174,6 @@ export default function ScheduleForm({ providers, editing, onSaved, onCancel }: 
         stream: params.stream,
         concurrency: params.concurrency,
         iterations: params.iterations,
-        disable_reasoning: params.disableReasoning,
         max_rpm: params.maxRpm,
       };
       if (editing) await updateSchedule(editing.id, payload);

@@ -28,7 +28,6 @@ class SpeedTestRequest(BaseModel):
     max_tokens: int = 256
     temperature: float = 0.7
     stream: bool = False
-    disable_reasoning: bool = False
     protocol: str = "openai"
 
 
@@ -49,7 +48,6 @@ class BatchSpeedTestRequest(BaseModel):
     concurrency: int = 1
     iterations: int = 1
     stream: bool = False
-    disable_reasoning: bool = False
     max_rpm: int = -1
 
 
@@ -184,7 +182,6 @@ class ScheduleCreate(BaseModel):
     stream: bool = True
     concurrency: int = 1
     iterations: int = 1
-    disable_reasoning: bool = False
     max_rpm: int = -1
 
 
@@ -198,7 +195,6 @@ class ScheduleUpdate(BaseModel):
     stream: Optional[bool] = None
     concurrency: Optional[int] = None
     iterations: Optional[int] = None
-    disable_reasoning: Optional[bool] = None
     max_rpm: Optional[int] = None
 
 
@@ -214,11 +210,13 @@ class ScheduleResponse(BaseModel):
     stream: bool = True
     concurrency: int = 1
     iterations: int = 1
-    disable_reasoning: bool = False
     max_rpm: int = -1
     created_at: str = ""
     updated_at: str = ""
     last_run_at: Optional[str] = None
     next_run_at: Optional[str] = None
     last_run_status: Optional[str] = None
+    run_total: int = 0
+    run_done: int = 0
+    run_success: int = 0
 

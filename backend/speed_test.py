@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
 import httpx
@@ -143,7 +144,6 @@ async def run_speed_test(
     max_tokens: int = 256,
     temperature: float = 0.7,
     stream: bool = False,
-    disable_reasoning: bool = False,
     provider_id: str = "",
     provider_name: str = "",
     protocol: str = "openai",
@@ -153,8 +153,6 @@ async def run_speed_test(
     base_url 需自带路径（含 /v1 等），不再自动拼接。
     protocol=anthropic 时请求 {base}/messages，用 x-api-key + anthropic-version，
     且不发送 temperature（Anthropic 4.7+ 模型已移除该参数，省略最稳妥）。
-    disable_reasoning 为 True 时尽量关闭模型的思考/推理（best-effort），
-    仅对支持该参数的服务商生效。
     """
     base = normalize_base_url(base_url)
     if protocol == "anthropic":
@@ -189,8 +187,6 @@ async def run_speed_test(
             # 多数 OpenAI-compatible 端点默认不返回流式 usage，追加 include_usage 以拿到准确 token 数。
             # 个别不识别该字段的端点会忽略它（OpenAI 兼容约定），不影响请求。
             payload["stream_options"] = {"include_usage": True}
-    if disable_reasoning:
-        payload["thinking"] = {"type": "disabled"}
 
     test_id = str(uuid.uuid4())
     created_at = datetime.now(timezone.utc).isoformat()
@@ -220,36 +216,37 @@ async def run_speed_test(
                             continue
                         if line.startswith("data: "):
                             data_str = line[6:]
-                            if data_str.strip() == "[DONE]":
+                            if protocol == "openai" and data_str.strip() == "[DONE]":
                                 break
                             try:
-                                import json
                                 chunk = json.loads(data_str)
-                                m = chunk.get("model")
-                                if m:
-                                    actual_model = m
-                                usage = chunk.get("usage")
-                                choices = chunk.get("choices", [])
-                                if choices:
-                                    delta = choices[0].get("delta", {})
-                                    rc = delta.get("reasoning_content") or delta.get("reasoning")
-                                    ct = delta.get("content")
-                                    if rc:
-                                        if first_token:
-                                            ttft_ms = (time.perf_counter() - start) * 1000
-                                            first_token = False
-                                        reasoning_chunk_count += 1
-                                    if ct:
-                                        if first_token:
-                                            ttft_ms = (time.perf_counter() - start) * 1000
-                                            first_token = False
-                                        if first_content_token:
-                                            content_ttft_ms = (time.perf_counter() - start) * 1000
-                                            first_content_token = False
-                                        content_chunk_count += 1
-                                        content_parts.append(ct)
+                                fields = _extract_stream_chunk(chunk, protocol)
+                                if fields["done"]:
+                                    break
+                                if fields["model"]:
+                                    actual_model = fields["model"]
+                                rc = fields["reasoning"]
+                                ct = fields["text"]
+                                if rc:
+                                    if first_token:
+                                        ttft_ms = (time.perf_counter() - start) * 1000
+                                        first_token = False
+                                    reasoning_chunk_count += 1
+                                if ct:
+                                    if first_token:
+                                        ttft_ms = (time.perf_counter() - start) * 1000
+                                        first_token = False
+                                    if first_content_token:
+                                        content_ttft_ms = (time.perf_counter() - start) * 1000
+                                        first_content_token = False
+                                    content_chunk_count += 1
+                                    content_parts.append(ct)
+                                usage = fields["usage"]
                                 if usage:
-                                    tokens_generated = usage.get("completion_tokens", 0) or 0
+                                    if protocol == "anthropic":
+                                        tokens_generated = usage.get("output_tokens", 0) or 0
+                                    else:
+                                        tokens_generated = usage.get("completion_tokens", 0) or 0
                                     reasoning_tokens = _extract_reasoning_tokens(usage)
                                     content_tokens = max(tokens_generated - reasoning_tokens, 0)
                             except json.JSONDecodeError:
@@ -272,11 +269,18 @@ async def run_speed_test(
 
             total_latency_ms = (time.perf_counter() - start) * 1000
             usage = data.get("usage", {})
-            tokens_generated = usage.get("completion_tokens", 0) or 0
-            reasoning_tokens = _extract_reasoning_tokens(usage)
-            content_tokens = max(tokens_generated - reasoning_tokens, 0)
+            if protocol == "anthropic":
+                tokens_generated = usage.get("output_tokens", 0) or 0
+                content_tokens = tokens_generated  # Anthropic usage 不拆分思考 token
+                response_content = "".join(
+                    b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"
+                ) or None
+            else:
+                tokens_generated = usage.get("completion_tokens", 0) or 0
+                reasoning_tokens = _extract_reasoning_tokens(usage)
+                content_tokens = max(tokens_generated - reasoning_tokens, 0)
+                response_content = data.get("choices", [{}])[0].get("message", {}).get("content") or None
             actual_model = data.get("model", model)
-            response_content = data.get("choices", [{}])[0].get("message", {}).get("content") or None
             # Non-streaming: no meaningful TTFT
             ttft_ms = None
             content_ttft_ms = None
@@ -319,7 +323,8 @@ async def run_speed_test(
             "id": test_id,
             "base_url": base_url,
             "model": model,
-            "actual_model": model,
+            # 失败样本统一 actual_model 为占位 "error"，与批量失败路径一致，便于前端解析口径过滤
+            "actual_model": "error",
             "provider_id": provider_id,
             "provider_name": provider_name,
             "response_content": None,
@@ -349,8 +354,8 @@ async def execute_batch_tests(
     concurrency: int,
     iterations: int,
     schedule_id: str | None = None,
-    disable_reasoning: bool = False,
     max_rpm: int = -1,
+    on_progress: Callable[[dict], Awaitable[None]] | None = None,
 ) -> list[dict]:
     """批量执行测速并入库。batch 端点与定时调度器共用。
 
@@ -387,14 +392,21 @@ async def execute_batch_tests(
                     max_tokens=max_tokens,
                     temperature=temperature,
                     stream=stream,
-                    disable_reasoning=disable_reasoning,
                     provider_id=item.get("provider_id", ""),
                     provider_name=item.get("provider_name", ""),
+                    protocol=item.get("protocol", "openai"),
                 )
             except Exception as e:
                 return _batch_error_result(e, item, prompt, max_tokens, temperature)
 
-    results = await asyncio.gather(*[run_one(it) for it in all_items], return_exceptions=True)
+    # 每完成一个测试回调一次进度（调度器据此更新 run_done/run_success 供前端 chip 展示）
+    async def run_one_progress(it: dict) -> dict:
+        r = await run_one(it)
+        if on_progress is not None:
+            await on_progress(r)
+        return r
+
+    results = await asyncio.gather(*[run_one_progress(it) for it in all_items], return_exceptions=True)
     results = [r if not isinstance(r, Exception) else _batch_error_result(r, it, prompt, max_tokens, temperature) for r, it in zip(results, all_items)]
 
     for r in results:

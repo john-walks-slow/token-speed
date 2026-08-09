@@ -43,16 +43,25 @@ function formatDate(iso?: string | null): string {
   });
 }
 
-function statusBadge(status?: string | null) {
-  switch (status) {
+function statusBadge(s: Schedule) {
+  const { run_done = 0, run_total = 0, run_success = 0 } = s;
+  switch (s.last_run_status) {
     case "success":
-      return <Badge variant="success" className="text-[10px]">成功</Badge>;
+      return run_total > 0
+        ? <Badge variant="success" className="text-[10px]">{run_success}/{run_total} 成功</Badge>
+        : <Badge variant="success" className="text-[10px]">成功</Badge>;
     case "partial":
-      return <Badge variant="warning" className="text-[10px]">部分成功</Badge>;
+      return run_total > 0
+        ? <Badge variant="warning" className="text-[10px]">{run_success}/{run_total} 成功</Badge>
+        : <Badge variant="warning" className="text-[10px]">部分成功</Badge>;
     case "failed":
-      return <Badge variant="destructive" className="text-[10px]">失败</Badge>;
+      return run_total > 0
+        ? <Badge variant="destructive" className="text-[10px]">{run_success}/{run_total} 成功</Badge>
+        : <Badge variant="destructive" className="text-[10px]">失败</Badge>;
     case "running":
-      return <Badge variant="secondary" className="text-[10px]">执行中</Badge>;
+      return run_total > 0
+        ? <Badge variant="secondary" className="text-[10px]">执行中 {run_done}/{run_total}</Badge>
+        : <Badge variant="secondary" className="text-[10px]">执行中</Badge>;
     default:
       return <span className="text-[10px] text-muted-foreground">未执行</span>;
   }
@@ -155,7 +164,7 @@ export default function ScheduleList({ refreshKey, onEdit }: Props) {
                   ) : (
                     <Badge variant="outline" className="text-[10px]">已暂停</Badge>
                   )}
-                  {statusBadge(s.last_run_status)}
+                  {statusBadge(s)}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <Button

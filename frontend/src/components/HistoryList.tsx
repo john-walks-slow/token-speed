@@ -9,7 +9,7 @@ import ResponseContentView from "@/components/ResponseContentView";
 import ErrorMessageView from "@/components/ErrorMessageView";
 import TimeRangeFilter from "@/components/TimeRangeFilter";
 import { filterTestsByRange, type TimeRangeValue } from "@/lib/timeRange";
-import { History, Trash2, X, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { Trash2, X, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 
 interface Props {
   refreshKey: number;
@@ -59,28 +59,23 @@ export default function HistoryList({ refreshKey, providers }: Props) {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <History className="w-4 h-4 text-primary" />
           <span className="text-sm font-medium">测速历史</span>
           <Badge variant="secondary" className="text-xs">
             {filteredTests.length}
           </Badge>
         </div>
-        {tests.length > 0 && (
-          <Button variant="ghost" size="sm" onClick={handleClear}>
-            <Trash2 className="w-3.5 h-3.5" />
-            清空
-          </Button>
-        )}
+        <Button variant="ghost" size="sm" onClick={handleClear} disabled={tests.length === 0}>
+          <Trash2 className="w-3.5 h-3.5" />
+          清空
+        </Button>
       </div>
 
       {/* 日期过滤 */}
-      {tests.length > 0 && (
-        <TimeRangeFilter
-          value={timeRange}
-          onChange={setTimeRange}
-          presets={["today", "7d", "30d", "all"]}
-        />
-      )}
+      <TimeRangeFilter
+        value={timeRange}
+        onChange={setTimeRange}
+        presets={["today", "7d", "30d", "all"]}
+      />
 
       {loading ? (
         <div className="flex items-center justify-center py-8">
@@ -94,7 +89,7 @@ export default function HistoryList({ refreshKey, providers }: Props) {
         <div className="space-y-1.5 max-h-96 overflow-y-auto">
           {filteredTests.map((t) => (
             <Card key={t.id} className="border-0 bg-card/30 group">
-              <CardContent className="p-3">
+              <CardContent className="p-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 min-w-0">
                     {t.success ? (
@@ -114,11 +109,8 @@ export default function HistoryList({ refreshKey, providers }: Props) {
                       {new Date(t.created_at).toLocaleTimeString()}
                     </span>
                   </div>
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
-                    <ResponseContentView content={t.response_content} />
+                  <div className="flex items-center gap-1 shrink-0">
                     {!t.success && <ErrorMessageView message={t.error_message} />}
-                    <span className="tabular-nums">{t.tps !== null ? `${t.tps} tok/s` : "N/A"}</span>
-                    <span className="tabular-nums">{t.total_latency_ms}ms</span>
                     <button
                       title="删除"
                       onClick={() => handleDelete(t.id)}
@@ -128,6 +120,25 @@ export default function HistoryList({ refreshKey, providers }: Props) {
                     </button>
                   </div>
                 </div>
+
+                {t.success && (
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground tabular-nums border-t border-border/20 pt-2">
+                    <ResponseContentView content={t.response_content} />
+                    <span>TTFT {t.ttft_ms !== null ? `${t.ttft_ms}ms` : "N/A"}</span>
+                    <span>{t.total_latency_ms}ms</span>
+                    <span>{t.tps !== null ? `${t.tps} tok/s` : "N/A"}</span>
+                    {t.reasoning_tokens > 0 ? (
+                      <span className="text-purple-400" title="reasoning / content tokens">
+                        {t.reasoning_tokens}+{t.content_tokens}
+                      </span>
+                    ) : (
+                      <span title="output tokens">{t.content_tokens} tokens</span>
+                    )}
+                    {t.thinking_ms !== null && t.thinking_ms > 0 && (
+                      <span title="思考耗时">思考 {t.thinking_ms}ms</span>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
           ))}

@@ -33,28 +33,13 @@ export interface SpeedTestResult {
   created_at: string;
 }
 
-export interface BatchSummary {
-  total_tests: number;
-  successful: number;
-  failed: number;
-  avg_tps: number | null;
-  avg_latency_ms: number;
-  best_model: string;
-  best_tps: number | null;
-  best_base_url?: string;
-}
-
 export interface SpeedTestItem {
   model: string;
   base_url: string;
   api_key: string;
   provider_id: string;
   provider_name: string;
-}
-
-export interface BatchResponse {
-  results: SpeedTestResult[];
-  summary: BatchSummary;
+  protocol: string;
 }
 
 export interface TestHistory {
@@ -101,6 +86,7 @@ export interface Provider {
   name: string;
   base_url: string;
   api_key: string;
+  protocol: "openai" | "anthropic";
   models: string[];
   created_at: string;
   updated_at: string;
@@ -129,13 +115,15 @@ export interface Schedule {
   stream: boolean;
   concurrency: number;
   iterations: number;
-  disable_reasoning: boolean;
   max_rpm: number;
   created_at: string;
   updated_at: string;
   last_run_at?: string | null;
   next_run_at?: string | null;
   last_run_status?: string | null;
+  run_total?: number;
+  run_done?: number;
+  run_success?: number;
 }
 
 export interface ScheduleCreate {
@@ -148,7 +136,6 @@ export interface ScheduleCreate {
   stream: boolean;
   concurrency: number;
   iterations: number;
-  disable_reasoning: boolean;
   max_rpm: number;
 }
 

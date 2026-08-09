@@ -35,16 +35,14 @@ export default function ModelSelector({
     );
   }
 
-  const totalModels = filtered.reduce((sum, g) => sum + g.models.length, 0);
-
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">{title}</span>
-        <span className="text-xs text-muted-foreground">
-          已选 {selectedKeys.size}/{totalModels}
-        </span>
-      </div>
+    <div className="space-y-5">
+      {title && (
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium">{title}</span>
+          <div className="w-8" />
+        </div>
+      )}
 
       {filtered.map((g) => {
         const providerSelected = Array.from(selectedKeys.keys()).filter((k) =>

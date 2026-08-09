@@ -68,7 +68,7 @@ app.add_middleware(
 
 @app.post("/api/connect", response_model=ConnectResponse)
 async def connect(req: ConnectRequest):
-    success, result = await list_models(req.base_url, req.api_key)
+    success, result = await list_models(req.base_url, req.api_key, req.protocol)
     if success:
         return ConnectResponse(success=True, models=result)
     return ConnectResponse(success=False, error=str(result))
@@ -84,7 +84,7 @@ async def speed_test(req: SpeedTestRequest):
         max_tokens=req.max_tokens,
         temperature=req.temperature,
         stream=req.stream,
-        disable_reasoning=req.disable_reasoning,
+        protocol=req.protocol,
     )
     await insert_speed_test(result)
     return SpeedTestResult(**result)
@@ -235,9 +235,9 @@ async def _iter_batch_results(req: BatchSpeedTestRequest):
                     max_tokens=req.max_tokens,
                     temperature=req.temperature,
                     stream=req.stream,
-                    disable_reasoning=req.disable_reasoning,
                     provider_id=item.provider_id,
                     provider_name=item.provider_name,
+                    protocol=item.protocol,
                 )
             except Exception as e:
                 return _to_error_result(item, req, e, now_iso)
@@ -335,13 +335,13 @@ async def get_providers():
 
 @app.post("/api/providers", response_model=ProviderResponse, status_code=201)
 async def add_provider(req: ProviderCreate):
-    p = await create_provider(req.name, req.base_url, req.api_key, req.models if req.models else None)
+    p = await create_provider(req.name, req.base_url, req.api_key, req.models if req.models else None, protocol=req.protocol)
     return ProviderResponse(**p)
 
 
 @app.put("/api/providers/{provider_id}", response_model=ProviderResponse)
 async def edit_provider(provider_id: str, req: ProviderUpdate):
-    p = await update_provider(provider_id, req.name, req.base_url, req.api_key, models=req.models)
+    p = await update_provider(provider_id, req.name, req.base_url, req.api_key, models=req.models, protocol=req.protocol)
     if p is None:
         raise HTTPException(404, "Provider not found")
     return ProviderResponse(**p)
@@ -379,13 +379,15 @@ def _schedule_response(s: dict) -> ScheduleResponse:
         stream=bool(s.get("stream")),
         concurrency=s.get("concurrency") or 1,
         iterations=s.get("iterations") or 1,
-        disable_reasoning=bool(s.get("disable_reasoning")),
         max_rpm=s.get("max_rpm") if s.get("max_rpm") is not None else -1,
         created_at=s.get("created_at") or "",
         updated_at=s.get("updated_at") or "",
         last_run_at=s.get("last_run_at"),
         next_run_at=s.get("next_run_at"),
         last_run_status=s.get("last_run_status"),
+        run_total=s.get("run_total") or 0,
+        run_done=s.get("run_done") or 0,
+        run_success=s.get("run_success") or 0,
     )
 
 
@@ -407,7 +409,6 @@ async def add_schedule(req: ScheduleCreate):
         stream=req.stream,
         concurrency=req.concurrency,
         iterations=req.iterations,
-        disable_reasoning=req.disable_reasoning,
         max_rpm=req.max_rpm,
     )
     return _schedule_response(s)

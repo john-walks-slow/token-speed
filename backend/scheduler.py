@@ -7,6 +7,8 @@ from .database import (
     get_provider,
     get_schedule,
     mark_schedule_stale_running,
+    reset_schedule_run_progress,
+    update_schedule_progress,
     update_schedule_run_status,
 )
 from .speed_test import execute_batch_tests
@@ -105,12 +107,23 @@ class SpeedTestScheduler:
                         "api_key": prov["api_key"],
                         "provider_id": prov["id"],
                         "provider_name": prov["name"],
+                        "protocol": prov.get("protocol", "openai"),
                     })
 
             if not tests:
                 # 全部 target 失效
                 await update_schedule_run_status(schedule_id, "failed")
                 return
+
+            # 重置本轮计数，单测完成后逐条递增，供前端 chip 展示 x/y
+            await reset_schedule_run_progress(
+                schedule_id, len(tests) * (sched["iterations"] or 1)
+            )
+
+            async def on_progress(result: dict) -> None:
+                await update_schedule_progress(
+                    schedule_id, bool(result.get("success"))
+                )
 
             results = await execute_batch_tests(
                 tests,
@@ -121,8 +134,8 @@ class SpeedTestScheduler:
                 concurrency=sched["concurrency"] or 1,
                 iterations=sched["iterations"] or 1,
                 schedule_id=schedule_id,
-                disable_reasoning=bool(sched["disable_reasoning"]),
                 max_rpm=sched["max_rpm"] if sched["max_rpm"] is not None else -1,
+                on_progress=on_progress,
             )
             ok = sum(1 for r in results if r["success"])
             if ok == len(results):

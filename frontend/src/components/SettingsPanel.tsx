@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import { getAutostart, setAutostart, getNetworkSettings, setNetworkSettings } from "@/lib/api";
 import { getTheme, setTheme, type ThemeMode } from "@/lib/theme";
 import type { AutostartSettings, NetworkSettings } from "@/types";
-import { Loader2 } from "lucide-react";
+import { Loader2, Palette, Globe, Power } from "lucide-react";
 
 const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: "system", label: "跟随系统" },
@@ -24,6 +25,27 @@ const initialNetwork: NetworkSettings = {
   custom_proxy: "",
   verify_ssl: true,
 };
+
+/** 分区标题：图标 + 标题 + 说明，与 History/Stats/Schedule 的标题行风格一致。 */
+function SectionTitle({
+  icon,
+  title,
+  desc,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  desc: string;
+}) {
+  return (
+    <div className="flex items-start gap-2">
+      <span className="mt-0.5 shrink-0 text-muted-foreground">{icon}</span>
+      <div>
+        <div className="text-sm font-medium">{title}</div>
+        <p className="text-xs text-muted-foreground">{desc}</p>
+      </div>
+    </div>
+  );
+}
 
 export default function SettingsPanel() {
   const [settings, setSettings] = useState<AutostartSettings | null>(null);
@@ -78,32 +100,38 @@ export default function SettingsPanel() {
 
   if (error) {
     return (
-      <div className="text-sm text-destructive">
-        {error}
-        <button className="underline ml-2" onClick={() => setError("")}>
-          关闭
-        </button>
-      </div>
+      <Card className="border-0 bg-card/30">
+        <CardContent className="p-4 text-sm text-destructive">
+          {error}
+          <button className="underline ml-2 cursor-pointer" onClick={() => setError("")}>
+            关闭
+          </button>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>外观</CardTitle>
-          <CardDescription>界面深浅色模式，默认跟随系统</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex gap-2">
+    <div className="space-y-5">
+      {/* 面板标题 */}
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium">设置</span>
+        <div className="w-8" />
+      </div>
+
+      {/* 外观 */}
+      <Card className="border-0 bg-card/30">
+        <CardContent className="p-4 space-y-4">
+          <SectionTitle icon={<Palette className="w-4 h-4" />} title="外观" desc="界面深浅色模式，默认跟随系统" />
+          <div className="flex flex-wrap gap-1.5">
             {THEME_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
                 onClick={() => changeTheme(opt.value)}
-                className={`px-4 py-2 rounded-md text-sm border transition-colors cursor-pointer ${
+                className={`text-xs px-3 py-1.5 rounded-full border transition-colors cursor-pointer ${
                   theme === opt.value
-                    ? "bg-primary text-primary-foreground border-primary"
-                    : "border-border bg-card hover:bg-accent"
+                    ? "border-primary bg-primary/15 text-primary"
+                    : "border-border text-muted-foreground hover:border-primary/50"
                 }`}
               >
                 {opt.label}
@@ -113,68 +141,70 @@ export default function SettingsPanel() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>网络</CardTitle>
-          <CardDescription>代理与 TLS 配置，对连接检测与测速即时生效</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-1.5">
-            <label className="text-sm">代理模式</label>
-            <Select
-              value={form.proxy_mode}
-              onChange={(e) =>
-                setForm({ ...form, proxy_mode: e.target.value as NetworkSettings["proxy_mode"] })
-              }
-            >
-              {PROXY_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </Select>
-          </div>
-
-          {form.proxy_mode === "custom" && (
+      {/* 网络 */}
+      <Card className="border-0 bg-card/30">
+        <CardContent className="p-4 space-y-4">
+          <SectionTitle
+            icon={<Globe className="w-4 h-4" />}
+            title="网络"
+            desc="代理与 TLS 配置，对连接检测与测速即时生效"
+          />
+          <div className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-sm">代理地址</label>
-              <Input
-                placeholder="http://127.0.0.1:7890"
-                value={form.custom_proxy}
-                onChange={(e) => setForm({ ...form, custom_proxy: e.target.value })}
-              />
+              <label className="text-sm">代理模式</label>
+              <Select
+                value={form.proxy_mode}
+                onChange={(e) =>
+                  setForm({ ...form, proxy_mode: e.target.value as NetworkSettings["proxy_mode"] })
+                }
+              >
+                {PROXY_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </Select>
             </div>
-          )}
 
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              className="accent-primary h-4 w-4"
-              checked={!form.verify_ssl}
-              onChange={(e) => setForm({ ...form, verify_ssl: !e.target.checked })}
-            />
-            <span className="text-sm">忽略 TLS 证书错误</span>
-          </label>
-
-          <div className="flex items-center gap-3 pt-1">
-            <button
-              className="px-4 py-2 rounded-md text-sm bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-              disabled={!netDirty || saving}
-              onClick={saveNetwork}
-            >
-              {saving ? "保存中…" : "保存"}
-            </button>
-            {saveMsg && (
-              <span className="text-sm text-muted-foreground">{saveMsg}</span>
+            {form.proxy_mode === "custom" && (
+              <div className="space-y-1.5">
+                <label className="text-sm">代理地址</label>
+                <Input
+                  placeholder="http://127.0.0.1:7890"
+                  value={form.custom_proxy}
+                  onChange={(e) => setForm({ ...form, custom_proxy: e.target.value })}
+                />
+              </div>
             )}
+
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                className="accent-primary h-4 w-4"
+                checked={!form.verify_ssl}
+                onChange={(e) => setForm({ ...form, verify_ssl: !e.target.checked })}
+              />
+              <span className="text-sm">忽略 TLS 证书错误</span>
+            </label>
+
+            <div className="flex items-center gap-3 pt-1">
+              <Button disabled={!netDirty || saving} onClick={saveNetwork}>
+                {saving ? "保存中…" : "保存"}
+              </Button>
+              {saveMsg && (
+                <span className="text-sm text-muted-foreground">{saveMsg}</span>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>开机自启</CardTitle>
-          <CardDescription>登录 Windows 后自动在后台运行 Token Speed（定时测速持续生效）</CardDescription>
-        </CardHeader>
-        <CardContent>
+      {/* 开机自启 */}
+      <Card className="border-0 bg-card/30">
+        <CardContent className="p-4 space-y-4">
+          <SectionTitle
+            icon={<Power className="w-4 h-4" />}
+            title="开机自启"
+            desc="登录 Windows 后自动在后台运行 Token Speed（定时测速持续生效）"
+          />
           {settings === null ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="w-4 h-4 animate-spin" />

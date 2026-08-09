@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +39,7 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
   const [formName, setFormName] = useState("");
   const [formUrl, setFormUrl] = useState("");
   const [formKey, setFormKey] = useState("");
+  const [formProtocol, setFormProtocol] = useState<"openai" | "anthropic">("openai");
   const [saving, setSaving] = useState(false);
 
   // Model management dialog
@@ -79,7 +81,7 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
     async (p: Provider) => {
       setDetecting(true);
       try {
-        const res = await connect(p.base_url, p.api_key);
+        const res = await connect(p.base_url, p.api_key, p.protocol);
         const modelIds = res.success ? res.models.map((m) => m.id) : [];
         if (modelIds.length > 0) {
           const merged = mergeDetectedModels(p.models || [], modelIds);
@@ -105,15 +107,16 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
     const name = formName.trim();
     const url = formUrl.trim();
     const key = formKey.trim();
+    const protocol = formProtocol;
 
     // Create or update
     if (isEdit) {
-      await updateProvider(editingId, { name, base_url: url, api_key: key });
+      await updateProvider(editingId, { name, base_url: url, api_key: key, protocol });
     } else {
-      const created = await createProvider({ name, base_url: url, api_key: key });
+      const created = await createProvider({ name, base_url: url, api_key: key, protocol });
       await refresh();
       // Auto-detect models after creation
-      const res = await connect(created.base_url, created.api_key);
+      const res = await connect(created.base_url, created.api_key, protocol);
       if (res.success && res.models.length > 0) {
         await updateProviderModels(created.id, res.models.map((m) => m.id));
       }
@@ -125,6 +128,7 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
     setFormName("");
     setFormUrl("");
     setFormKey("");
+    setFormProtocol("openai");
     setSaving(false);
     await refresh();
   };
@@ -134,6 +138,7 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
     setFormName(p.name);
     setFormUrl(p.base_url);
     setFormKey(p.api_key);
+    setFormProtocol(p.protocol || "openai");
     setShowForm(true);
   };
 
@@ -189,6 +194,7 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
           setFormName("");
           setFormUrl("");
           setFormKey("");
+          setFormProtocol("openai");
         }}
       >
         <Plus className="w-3.5 h-3.5" />
@@ -200,7 +206,14 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
   const providerForm = (
     <div className="space-y-2">
       <Input placeholder="名称" value={formName} onChange={(e) => setFormName(e.target.value)} />
-      <Input placeholder="Base URL" value={formUrl} onChange={(e) => setFormUrl(e.target.value)} />
+      <Input placeholder="Base URL，如 https://openrouter.ai/api/v1" value={formUrl} onChange={(e) => setFormUrl(e.target.value)} />
+      <Select
+        value={formProtocol}
+        onChange={(e) => setFormProtocol(e.target.value as "openai" | "anthropic")}
+      >
+        <option value="openai">OpenAI 兼容</option>
+        <option value="anthropic">Anthropic 格式</option>
+      </Select>
       <Input type="password" placeholder="API Key (可选)" value={formKey} onChange={(e) => setFormKey(e.target.value)} />
       <div className="flex justify-end gap-2">
         <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setEditingId(null); }}>取消</Button>
@@ -260,6 +273,14 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
                         {p.models.length}
                       </Badge>
                     )}
+                    <Badge
+                      variant="outline"
+                      className={`text-[10px] px-1 py-0 ${
+                        p.protocol === "anthropic" ? "text-amber-600 border-amber-600/40" : "text-muted-foreground"
+                      }`}
+                    >
+                      {p.protocol === "anthropic" ? "Anthropic 格式" : "OpenAI 兼容"}
+                    </Badge>
                   </div>
                   <div className="flex items-center gap-0.5 shrink-0">
                     <button
@@ -331,6 +352,7 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
                     setFormName("");
                     setFormUrl("");
                     setFormKey("");
+                    setFormProtocol("openai");
                   }}
                 >
                   <Plus className="w-3.5 h-3.5" />

@@ -1,5 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { FileText } from "lucide-react";
+import HoverPopover from "@/components/HoverPopover";
 
 interface Props {
   content?: string | null;
@@ -10,12 +11,15 @@ export default function ResponseContentView({ content }: Props) {
   if (!content) return null;
 
   return (
-    <span className="relative group inline-flex">
-      <FileText
-        className="w-3.5 h-3.5 text-muted-foreground hover:text-primary transition-colors cursor-help"
-        aria-label="查看响应"
-      />
-      <span className="absolute right-0 top-full z-30 mt-1 hidden group-hover:block w-80 max-w-md">
+    <HoverPopover
+      className="w-80 max-w-md"
+      trigger={
+        <FileText
+          className="w-3.5 h-3.5 text-muted-foreground hover:text-primary transition-colors cursor-help shrink-0"
+          aria-label="查看响应"
+        />
+      }
+      content={
         <Card className="border-border bg-background shadow-lg">
           <CardContent className="p-3">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5">
@@ -26,7 +30,7 @@ export default function ResponseContentView({ content }: Props) {
             </pre>
           </CardContent>
         </Card>
-      </span>
-    </span>
+      }
+    />
   );
 }

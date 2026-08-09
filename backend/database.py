@@ -81,7 +81,6 @@ def _get_conn():
             stream           INTEGER DEFAULT 1,
             concurrency      INTEGER DEFAULT 1,
             iterations       INTEGER DEFAULT 1,
-            disable_reasoning INTEGER DEFAULT 0,
             max_rpm          INTEGER DEFAULT -1,
             targets_json     TEXT DEFAULT '[]',
             created_at       TIMESTAMP,
@@ -116,8 +115,10 @@ def _get_conn():
         except sqlite3.OperationalError:
             pass  # column already exists
         for col_def in [
-            "disable_reasoning INTEGER DEFAULT 0",
             "max_rpm INTEGER DEFAULT -1",
+            "run_total INTEGER DEFAULT 0",
+            "run_done INTEGER DEFAULT 0",
+            "run_success INTEGER DEFAULT 0",
         ]:
             col_name = col_def.split()[0]
             try:
@@ -393,7 +394,6 @@ async def create_schedule(
     stream: bool,
     concurrency: int,
     iterations: int,
-    disable_reasoning: bool = False,
     max_rpm: int = -1,
 ) -> dict:
     sid = str(uuid.uuid4())
@@ -401,13 +401,12 @@ async def create_schedule(
     _run(
         """INSERT INTO schedules
            (id, name, enabled, interval_minutes, prompt, max_tokens, temperature,
-            stream, concurrency, iterations, disable_reasoning, max_rpm, targets_json,
+            stream, concurrency, iterations, max_rpm, targets_json,
             created_at, updated_at, next_run_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             sid, name, 1, interval_minutes, prompt, max_tokens, temperature,
-            1 if stream else 0, concurrency, iterations,
-            1 if disable_reasoning else 0, max_rpm,
+            1 if stream else 0, concurrency, iterations, max_rpm,
             json.dumps(targets), now, now,
             _next_run_iso(now, interval_minutes),
         ),
@@ -430,7 +429,6 @@ async def update_schedule(schedule_id: str, fields: dict) -> dict | None:
         "stream": int(bool(fields.get("stream", existing["stream"]))),
         "concurrency": fields.get("concurrency", existing["concurrency"]),
         "iterations": fields.get("iterations", existing["iterations"]),
-        "disable_reasoning": int(bool(fields.get("disable_reasoning", existing["disable_reasoning"]))),
         "max_rpm": fields.get("max_rpm", existing["max_rpm"]),
         "enabled": int(bool(fields.get("enabled", existing["enabled"]))),
     }
@@ -440,13 +438,13 @@ async def update_schedule(schedule_id: str, fields: dict) -> dict | None:
     _run(
         """UPDATE schedules SET
            name=?, interval_minutes=?, targets_json=?, prompt=?, max_tokens=?,
-           temperature=?, stream=?, concurrency=?, iterations=?, disable_reasoning=?,
-           max_rpm=?, enabled=?, next_run_at=?, updated_at=?
+           temperature=?, stream=?, concurrency=?, iterations=?, max_rpm=?,
+           enabled=?, next_run_at=?, updated_at=?
            WHERE id=?""",
         (
             m["name"], m["interval_minutes"], m["targets_json"], m["prompt"],
             m["max_tokens"], m["temperature"], m["stream"], m["concurrency"],
-            m["iterations"], m["disable_reasoning"], m["max_rpm"], m["enabled"],
+            m["iterations"], m["max_rpm"], m["enabled"],
             m["next_run_at"], m["updated_at"],
             schedule_id,
         ),
@@ -494,6 +492,22 @@ async def update_schedule_run_status(schedule_id: str, status: str) -> None:
     _run(
         "UPDATE schedules SET last_run_status=?, last_run_at=? WHERE id=?",
         (status, now, schedule_id),
+    )
+
+
+async def reset_schedule_run_progress(schedule_id: str, total: int) -> None:
+    """新一轮执行开始时重置计数。total 为展开迭代后的总测试数。"""
+    _run(
+        "UPDATE schedules SET run_total=?, run_done=0, run_success=0 WHERE id=?",
+        (total, schedule_id),
+    )
+
+
+async def update_schedule_progress(schedule_id: str, success: bool) -> None:
+    """单次测试完成时递增：run_done+1，成功样本再 run_success+1。"""
+    _run(
+        "UPDATE schedules SET run_done = run_done + 1, run_success = run_success + ? WHERE id=?",
+        (1 if success else 0, schedule_id),
     )
 
 

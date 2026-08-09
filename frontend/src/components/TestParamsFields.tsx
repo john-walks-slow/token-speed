@@ -9,7 +9,6 @@ export interface TestParamsValues {
   concurrency: number;
   iterations: number;
   stream: boolean;
-  disableReasoning: boolean;
   maxRpm: number;
 }
 
@@ -20,7 +19,6 @@ export const DEFAULT_PARAMS: TestParamsValues = {
   concurrency: 1,
   iterations: 1,
   stream: true,
-  disableReasoning: false,
   maxRpm: -1,
 };
 
@@ -102,16 +100,6 @@ export default function TestParamsFields({ values, onChange, persist = true }: P
           <span className="text-sm text-muted-foreground">Streaming 模式</span>
         </label>
 
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={values.disableReasoning}
-            onChange={(e) => set({ disableReasoning: e.target.checked })}
-            className="rounded border-input text-primary focus:ring-ring"
-          />
-          <span className="text-sm text-muted-foreground">关闭思考（不支持该参数的端点可能报错）</span>
-        </label>
-
         <div className="flex items-center gap-1.5">
           <label className="text-xs text-muted-foreground">每分钟最大请求</label>
           <Input
@@ -124,10 +112,6 @@ export default function TestParamsFields({ values, onChange, persist = true }: P
           />
         </div>
       </div>
-
-      <p className="text-[11px] text-muted-foreground/80">
-        横评建议：各模型使用相同 max_tokens 与并发；迭代 ≥3 次时统计取中位数更稳。
-      </p>
     </>
   );
 }

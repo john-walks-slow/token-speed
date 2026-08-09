@@ -35,12 +35,15 @@ export default function TimeRangeFilter({
 
   const openCustom = () => {
     setCustomOpen(true);
-    // 初始化 draft 为最近 7 天
+    // 初始化 draft 为最近 7 天，并立即选中自定义
     const to = new Date();
     const from = new Date();
     from.setDate(from.getDate() - 7);
     const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    setDraft({ from: fmt(from), to: fmt(to) });
+    const fromStr = fmt(from);
+    const toStr = fmt(to);
+    setDraft({ from: fromStr, to: toStr });
+    onChange({ type: "custom", from: fromStr, to: toStr });
   };
 
   return (
@@ -55,11 +58,11 @@ export default function TimeRangeFilter({
               setCustomOpen(false);
               onChange({ type: "preset", key });
             }}
-            className="cursor-pointer"
+            className="inline-flex items-center cursor-pointer"
           >
             <Badge
               variant={value.type === "preset" && value.key === key ? "default" : "outline"}
-              className="text-[10px] px-1.5 h-4"
+              className="text-[10px] px-1.5 h-4 leading-none"
             >
               {PRESET_LABELS[key]}
             </Badge>
@@ -75,13 +78,13 @@ export default function TimeRangeFilter({
                 openCustom();
               }
             }}
-            className="cursor-pointer"
+            className="inline-flex items-center cursor-pointer"
           >
             <Badge
               variant={value.type === "custom" ? "default" : "outline"}
-              className="text-[10px] px-1.5 h-4"
+              className="text-[10px] px-1.5 h-4 leading-none"
             >
-              <CalendarClock className="w-3 h-3 mr-0.5 inline" />
+              <CalendarClock className="w-3 h-3 mr-0.5" />
               自定义
             </Badge>
           </button>

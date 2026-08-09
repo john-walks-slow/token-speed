@@ -4,14 +4,14 @@ import ConnectionConfig from "@/components/ConnectionConfig";
 import ModelSelector from "@/components/ModelSelector";
 import SpeedTestForm from "@/components/SpeedTestForm";
 import SpeedTestProgress from "@/components/SpeedTestProgress";
-import SpeedTestResults from "@/components/SpeedTestResults";
+import RunResults from "@/components/RunResults";
 import HistoryList from "@/components/HistoryList";
 import StatsPanel from "@/components/StatsPanel";
 import SchedulePanel from "@/components/SchedulePanel";
 import SettingsPanel from "@/components/SettingsPanel";
 import { streamBatchSpeedTest, getProviders } from "@/lib/api";
 import { useHashRoute } from "@/lib/router";
-import type { Provider, SpeedTestResult, BatchSummary, SpeedTestItem } from "@/types";
+import type { Provider, SpeedTestResult, SpeedTestItem } from "@/types";
 import {
   Gauge,
   BarChart3,
@@ -29,7 +29,6 @@ export default function App() {
   const [selectedTests, setSelectedTests] = useState<Map<string, SpeedTestItem>>(new Map());
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<SpeedTestResult[]>([]);
-  const [summary, setSummary] = useState<BatchSummary | undefined>();
   const [progress, setProgress] = useState<{ completed: number; total: number; results: SpeedTestResult[] } | null>(null);
   const [cancelled, setCancelled] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -85,6 +84,7 @@ export default function App() {
             api_key: p.api_key,
             provider_id: p.id,
             provider_name: p.name,
+            protocol: p.protocol,
           });
         }
         return next;
@@ -108,6 +108,7 @@ export default function App() {
               api_key: p.api_key,
               provider_id: p.id,
               provider_name: p.name,
+              protocol: p.protocol,
             });
           } else {
             next.delete(key);
@@ -127,7 +128,6 @@ export default function App() {
       concurrency: number;
       iterations: number;
       stream: boolean;
-      disableReasoning: boolean;
       maxRpm: number;
     }) => {
       const tests = Array.from(selectedTests.values());
@@ -136,10 +136,10 @@ export default function App() {
       setRunning(true);
       setCancelled(false);
       setResults([]);
-      setSummary(undefined);
       setProgress({ completed: 0, total, results: [] });
       const controller = new AbortController();
       abortRef.current = controller;
+      const collected: SpeedTestResult[] = [];
       try {
         await streamBatchSpeedTest(
           {
@@ -150,59 +150,52 @@ export default function App() {
             concurrency: params.concurrency,
             iterations: params.iterations,
             stream: params.stream,
-            disable_reasoning: params.disableReasoning,
             max_rpm: params.maxRpm,
           },
           {
             onProgress: (ev) => {
-              setProgress((prev) => ({
-                completed: ev.index,
-                total: ev.total,
-                results: [...(prev?.results ?? []), ev.result],
-              }));
-            },
-            onSummary: (ev) => {
-              setResults(ev.results);
-              setSummary(ev.summary);
-              setProgress(null);
-              setRefreshKey((k) => k + 1);
-              setTab("results");
+              collected.push(ev.result);
+              setProgress({ completed: ev.index, total: ev.total, results: collected });
             },
           },
           controller.signal
         );
+        // 正常完成：收起进度面板，展示本次全部结果（含失败），不跳转
+        setResults(collected);
+        setProgress(null);
+        setRefreshKey((k) => k + 1);
       } catch (e) {
         if (controller.signal.aborted) {
           // User cancelled — keep partial results shown in the progress panel
           setCancelled(true);
-        } else {
-          setResults([
-            {
-              id: "error",
-              base_url: "",
-              model: "error",
-              actual_model: "error",
-              provider_id: null,
-              provider_name: null,
-              response_content: null,
-              prompt: "",
-              max_tokens: 0,
-              temperature: 0,
-              ttft_ms: null,
-              content_ttft_ms: null,
-              total_latency_ms: 0,
-              tokens_generated: 0,
-              reasoning_tokens: 0,
-              content_tokens: 0,
-              thinking_ms: null,
-              tps: null,
-              success: false,
-              error_message: e instanceof Error ? e.message : "测试失败",
-              created_at: new Date().toISOString(),
-            },
-          ]);
-          setProgress(null);
+          return;
         }
+        setResults([
+          {
+            id: "error",
+            base_url: "",
+            model: "error",
+            actual_model: "error",
+            provider_id: null,
+            provider_name: null,
+            response_content: null,
+            prompt: "",
+            max_tokens: 0,
+            temperature: 0,
+            ttft_ms: null,
+            content_ttft_ms: null,
+            total_latency_ms: 0,
+            tokens_generated: 0,
+            reasoning_tokens: 0,
+            content_tokens: 0,
+            thinking_ms: null,
+            tps: null,
+            success: false,
+            error_message: e instanceof Error ? e.message : "测试失败",
+            created_at: new Date().toISOString(),
+          },
+        ]);
+        setProgress(null);
       } finally {
         setRunning(false);
       }
@@ -213,6 +206,16 @@ export default function App() {
   const handleCancel = useCallback(() => {
     abortRef.current?.abort();
   }, []);
+
+  /** 收起进度面板，展示本次已完成的结果（取消时面板里的结果并入 results）。 */
+  const handleShowResults = useCallback(() => {
+    setResults((prev) => {
+      const seen = new Set(prev.map((r) => r.id));
+      const merged = [...prev, ...(progress?.results ?? []).filter((r) => !seen.has(r.id))];
+      return merged;
+    });
+    setProgress(null);
+  }, [progress]);
 
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
@@ -267,7 +270,7 @@ export default function App() {
                 </TabsTrigger>
                 <TabsTrigger value="results">
                   <Radio className="w-3.5 h-3.5 mr-1.5" />
-                  结果
+                  历史
                 </TabsTrigger>
                 <TabsTrigger value="stats">
                   <BarChart3 className="w-3.5 h-3.5 mr-1.5" />
@@ -316,18 +319,17 @@ export default function App() {
                         results={progress.results}
                         cancelled={cancelled}
                         onCancel={handleCancel}
+                        onShowResults={handleShowResults}
                         providers={providers}
                       />
                     )}
+                    <RunResults results={results} providers={providers} />
                   </div>
                 )}
               </TabsContent>
 
               <TabsContent value="results">
-                <div className="space-y-6">
-                  <SpeedTestResults results={results} summary={summary} providers={providers} />
-                  <HistoryList refreshKey={refreshKey} providers={providers} />
-                </div>
+                <HistoryList refreshKey={refreshKey} providers={providers} />
               </TabsContent>
 
               <TabsContent value="stats">

@@ -1,11 +1,8 @@
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { XCircle } from "lucide-react";
 import type { Provider, SpeedTestResult } from "@/types";
-import { modelDisplayLabel } from "@/lib/modelLabel";
-import ResponseContentView from "@/components/ResponseContentView";
-import ErrorMessageView from "@/components/ErrorMessageView";
+import ResultRow from "@/components/ResultRow";
 
 interface Props {
   completed: number;
@@ -13,10 +10,12 @@ interface Props {
   results: SpeedTestResult[];
   cancelled: boolean;
   onCancel: () => void;
+  /** 收起进度面板并展示本次已完成的结果。取消/失败时可用。 */
+  onShowResults: () => void;
   providers: Provider[];
 }
 
-export default function SpeedTestProgress({ completed, total, results, cancelled, onCancel, providers }: Props) {
+export default function SpeedTestProgress({ completed, total, results, cancelled, onCancel, onShowResults, providers }: Props) {
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
   return (
@@ -36,6 +35,11 @@ export default function SpeedTestProgress({ completed, total, results, cancelled
           </div>
           <div className="flex items-center gap-3">
             <span className="text-xs text-muted-foreground tabular-nums">{pct}%</span>
+            {cancelled && results.length > 0 && (
+              <Button type="button" variant="ghost" size="sm" onClick={onShowResults}>
+                查看结果
+              </Button>
+            )}
             <Button
               type="button"
               variant="ghost"
@@ -59,36 +63,7 @@ export default function SpeedTestProgress({ completed, total, results, cancelled
         {results.length > 0 && (
           <div className="space-y-1.5 max-h-64 overflow-y-auto">
             {results.map((r) => (
-              <div
-                key={r.id}
-                className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-md bg-card/60 text-sm"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="truncate font-medium">{modelDisplayLabel(providers, r)}</span>
-                  <Badge
-                    variant={r.success ? "success" : "destructive"}
-                    className="text-[10px] px-1.5"
-                  >
-                    {r.success ? "成功" : "失败"}
-                  </Badge>
-                </div>
-                <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0 tabular-nums">
-                  <ResponseContentView content={r.response_content} />
-                  {r.success ? (
-                    <>
-                      <span>{r.tps !== null ? `${r.tps} tok/s` : "N/A"}</span>
-                      <span>{r.total_latency_ms}ms</span>
-                    </>
-                  ) : (
-                    <span className="flex items-center gap-1.5 text-destructive/80">
-                      <span className="max-w-40 truncate">
-                        {r.error_message || "失败"}
-                      </span>
-                      <ErrorMessageView message={r.error_message} />
-                    </span>
-                  )}
-                </div>
-              </div>
+              <ResultRow key={r.id} result={r} providers={providers} />
             ))}
           </div>
         )}

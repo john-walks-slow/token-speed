@@ -1,8 +1,6 @@
 import type {
   ConnectResponse,
   SpeedTestResult,
-  BatchResponse,
-  BatchSummary,
   TestHistory,
   StatsResponse,
   ProviderListResponse,
@@ -30,43 +28,12 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 
 export async function connect(
   baseUrl: string,
-  apiKey: string
+  apiKey: string,
+  protocol = "openai"
 ): Promise<ConnectResponse> {
   return request("/connect", {
     method: "POST",
-    body: JSON.stringify({ base_url: baseUrl, api_key: apiKey }),
-  });
-}
-
-export async function runSpeedTest(params: {
-  base_url: string;
-  api_key: string;
-  model: string;
-  prompt: string;
-  max_tokens: number;
-  temperature: number;
-  stream: boolean;
-}): Promise<SpeedTestResult> {
-  return request("/speed-test", {
-    method: "POST",
-    body: JSON.stringify(params),
-  });
-}
-
-export async function runBatchSpeedTest(params: {
-  tests: { model: string; base_url: string; api_key: string }[];
-  prompt: string;
-  max_tokens: number;
-  temperature: number;
-  concurrency: number;
-  iterations: number;
-  stream: boolean;
-  disable_reasoning?: boolean;
-  max_rpm?: number;
-}): Promise<BatchResponse> {
-  return request("/speed-test/batch", {
-    method: "POST",
-    body: JSON.stringify(params),
+    body: JSON.stringify({ base_url: baseUrl, api_key: apiKey, protocol }),
   });
 }
 
@@ -78,24 +45,21 @@ export interface SpeedTestProgressEvent {
 
 export interface StreamHandlers {
   onProgress?: (event: SpeedTestProgressEvent) => void;
-  onSummary?: (event: { results: SpeedTestResult[]; summary: BatchSummary }) => void;
 }
 
 /**
  * Streams batch speed test results over SSE. Each completed test fires
- * onProgress; the final summary fires onSummary. Rejects on transport error
- * (abort signal included).
+ * onProgress. Rejects on transport error (abort signal included).
  */
 export async function streamBatchSpeedTest(
   params: {
-    tests: { model: string; base_url: string; api_key: string }[];
+    tests: { model: string; base_url: string; api_key: string; protocol?: string }[];
     prompt: string;
     max_tokens: number;
     temperature: number;
     concurrency: number;
     iterations: number;
     stream: boolean;
-    disable_reasoning?: boolean;
     max_rpm?: number;
   },
   handlers: StreamHandlers,
@@ -120,8 +84,6 @@ export async function streamBatchSpeedTest(
   const dispatch = (event: string, data: string) => {
     if (event === "progress") {
       handlers.onProgress?.(JSON.parse(data) as SpeedTestProgressEvent);
-    } else if (event === "summary") {
-      handlers.onSummary?.(JSON.parse(data) as { results: SpeedTestResult[]; summary: BatchSummary });
     }
   };
 
@@ -180,6 +142,7 @@ export async function createProvider(data: {
   name: string;
   base_url: string;
   api_key: string;
+  protocol?: "openai" | "anthropic";
   models?: string[];
 }): Promise<Provider> {
   return request("/providers", {
@@ -190,7 +153,13 @@ export async function createProvider(data: {
 
 export async function updateProvider(
   id: string,
-  data: { name: string; base_url: string; api_key: string; models?: string[] | null }
+  data: {
+    name: string;
+    base_url: string;
+    api_key: string;
+    protocol?: "openai" | "anthropic";
+    models?: string[] | null;
+  }
 ): Promise<Provider> {
   return request(`/providers/${id}`, {
     method: "PUT",

@@ -1,5 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { AlertTriangle } from "lucide-react";
+import HoverPopover from "@/components/HoverPopover";
 
 interface Props {
   message?: string | null;
@@ -10,12 +11,15 @@ export default function ErrorMessageView({ message }: Props) {
   if (!message) return null;
 
   return (
-    <span className="relative group inline-flex">
-      <AlertTriangle
-        className="w-3.5 h-3.5 text-destructive hover:text-destructive/80 transition-colors cursor-help shrink-0"
-        aria-label="查看错误"
-      />
-      <span className="absolute right-0 top-full z-30 mt-1 hidden group-hover:block w-80 max-w-md">
+    <HoverPopover
+      className="w-80 max-w-md"
+      trigger={
+        <AlertTriangle
+          className="w-3.5 h-3.5 text-destructive hover:text-destructive/80 transition-colors cursor-help shrink-0"
+          aria-label="查看错误"
+        />
+      }
+      content={
         <Card className="border-border bg-background shadow-lg">
           <CardContent className="p-3">
             <p className="text-[10px] text-destructive uppercase tracking-wider font-medium mb-1.5">
@@ -26,7 +30,7 @@ export default function ErrorMessageView({ message }: Props) {
             </pre>
           </CardContent>
         </Card>
-      </span>
-    </span>
+      }
+    />
   );
 }
