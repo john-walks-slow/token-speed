@@ -1,4 +1,4 @@
-"""路径解析：区分 PyInstaller 冻结态与开发/服务器态。
+r"""路径解析：区分 PyInstaller 冻结态与开发/服务器态。
 
 frozen（桌面 exe）：
   - DB      → %APPDATA%\TokenSpeed\speed_tests.db（可写，持久化）

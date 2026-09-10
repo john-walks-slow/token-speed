@@ -47,11 +47,15 @@ const GROUP_MODE_LABELS: Record<GroupMode, string> = {
 };
 
 /** 按统计口径取一条记录用于分组的 model。
- * 解析模式优先用服务端回传的 actual_model；为空或失败占位 "error" 时返回 null（该样本不计入统计）。 */
+ * 解析模式优先用服务端回传的 actual_model；为空时返回 null（该样本不计入统计）。
+ * 失败样本（占位 "error"）回退按输入 modelid 归组：成功率统计必须计入失败样本，
+ * 否则解析口径下成功率恒为 100%；数值指标路径均先过滤 success，不受回退影响。 */
 function groupModelOf(t: TestHistory, mode: GroupMode): string | null {
   if (mode === "input") return t.model;
   const am = t.actual_model;
-  return am && am !== "error" ? am : null;
+  if (am && am !== "error") return am;
+  if (!t.success && t.model && t.model !== "error") return t.model;
+  return null;
 }
 
 /** median(P50)：长尾分布下比 mean 稳定。 */

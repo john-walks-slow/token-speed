@@ -1,7 +1,7 @@
-"""测速指标口径单测：reasoning token 读取兼容、batch summary median 聚合。"""
+"""测速指标口径单测：reasoning token 读取兼容、usage 口径统一、batch summary median 聚合。"""
 import pytest
 
-from backend.speed_test import _extract_reasoning_tokens
+from backend.speed_test import _extract_reasoning_tokens, _reconcile_token_counts
 from backend.main import compute_summary, _median
 from backend.models import SpeedTestResult
 
@@ -45,6 +45,25 @@ class TestExtractReasoningTokens:
         assert _extract_reasoning_tokens({}) == 0
         assert _extract_reasoning_tokens(None) == 0
         assert _extract_reasoning_tokens({"completion_tokens": 10}) == 0
+
+
+class TestReconcileTokenCounts:
+    """两种 usage 口径统一：reasoning 是否计入 completion_tokens。"""
+
+    def test_openai_style_reasoning_included(self):
+        # OpenAI/DeepSeek：completion 含 reasoning → content = 94-40 = 54
+        assert _reconcile_token_counts(94, 40) == (94, 40, 54)
+
+    def test_gemini_style_reasoning_separate(self):
+        # CLIProxyAPI 转发 Gemini：completion 仅正文、reasoning 独立
+        assert _reconcile_token_counts(43, 931) == (974, 931, 43)
+
+    def test_no_reasoning(self):
+        assert _reconcile_token_counts(97, 0) == (97, 0, 97)
+
+    def test_reasoning_equals_completion(self):
+        # 纯思考无正文（OpenAI 口径：completion=reasoning, content=0）
+        assert _reconcile_token_counts(50, 50) == (50, 50, 0)
 
 
 class TestMedian:

@@ -13,6 +13,20 @@ from .network_settings import client_kwargs as net_client_kwargs
 from .url_utils import normalize_base_url
 
 
+def _reconcile_token_counts(completion_tokens: int, reasoning_tokens: int) -> tuple[int, int, int]:
+    """统一两种 usage 口径，返回 (tokens_generated, reasoning_tokens, content_tokens)。
+
+    - OpenAI/DeepSeek 口径：completion_tokens 已含 reasoning → content = completion - reasoning
+    - Gemini/部分网关转发口径（如 CLIProxyAPI 转发 Gemini）：completion_tokens 仅含正文，
+      reasoning_tokens 独立上报 → content = completion，generated = completion + reasoning
+
+    判据：reasoning > completion 时只可能是后者（content 不可能为负）。
+    """
+    if reasoning_tokens > completion_tokens:
+        return completion_tokens + reasoning_tokens, reasoning_tokens, completion_tokens
+    return completion_tokens, reasoning_tokens, max(completion_tokens - reasoning_tokens, 0)
+
+
 def _extract_reasoning_tokens(usage: dict) -> int:
     """从 usage 中读取 reasoning/thinking token 数，兼容多厂商字段。
 
@@ -197,12 +211,13 @@ async def run_speed_test(
     reasoning_tokens = 0
     content_tokens = 0
     actual_model = model
+    # 流中是否出现过 reasoning 增量：决定 thinking_ms 是否可测（网关只转正文、
+    # 仅在最终 usage 上报思考数时，思考耗时混入 TTFT，无法单独测量）
+    reasoning_chunk_count = 0
+    start = time.perf_counter()
 
     try:
-        start = time.perf_counter()
-
         if stream:
-            reasoning_chunk_count = 0
             content_chunk_count = 0
             first_token = True
             first_content_token = True
@@ -244,11 +259,15 @@ async def run_speed_test(
                                 usage = fields["usage"]
                                 if usage:
                                     if protocol == "anthropic":
+                                        # Anthropic 原生 usage 不拆分思考 token
                                         tokens_generated = usage.get("output_tokens", 0) or 0
+                                        reasoning_tokens = 0
+                                        content_tokens = tokens_generated
                                     else:
-                                        tokens_generated = usage.get("completion_tokens", 0) or 0
-                                    reasoning_tokens = _extract_reasoning_tokens(usage)
-                                    content_tokens = max(tokens_generated - reasoning_tokens, 0)
+                                        completion = usage.get("completion_tokens", 0) or 0
+                                        tokens_generated, reasoning_tokens, content_tokens = _reconcile_token_counts(
+                                            completion, _extract_reasoning_tokens(usage)
+                                        )
                             except json.JSONDecodeError:
                                 continue
 
@@ -276,9 +295,9 @@ async def run_speed_test(
                     b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"
                 ) or None
             else:
-                tokens_generated = usage.get("completion_tokens", 0) or 0
-                reasoning_tokens = _extract_reasoning_tokens(usage)
-                content_tokens = max(tokens_generated - reasoning_tokens, 0)
+                tokens_generated, reasoning_tokens, content_tokens = _reconcile_token_counts(
+                    usage.get("completion_tokens", 0) or 0, _extract_reasoning_tokens(usage)
+                )
                 response_content = data.get("choices", [{}])[0].get("message", {}).get("content") or None
             actual_model = data.get("model", model)
             # Non-streaming: no meaningful TTFT
@@ -292,7 +311,12 @@ async def run_speed_test(
             tps = (content_tokens / gen_time_s) if gen_time_s > 0 else None
         else:
             tps = None
-        thinking_ms = (content_ttft_ms - ttft_ms) if (content_ttft_ms is not None and ttft_ms is not None) else None
+        # 思考耗时仅在流中出现过 reasoning 增量时才可测（ttft=首个 reasoning token，
+        # content_ttft=首个正文 token）；否则网关只转正文，思考时间已混入 TTFT
+        if content_ttft_ms is not None and ttft_ms is not None and reasoning_chunk_count > 0:
+            thinking_ms = content_ttft_ms - ttft_ms
+        else:
+            thinking_ms = None
 
         return {
             "id": test_id,
@@ -318,7 +342,7 @@ async def run_speed_test(
             "created_at": created_at,
         }
     except Exception as e:
-        total_latency_ms = (time.perf_counter() - start) * 1000 if 'start' in dir() else 0
+        total_latency_ms = (time.perf_counter() - start) * 1000
         return {
             "id": test_id,
             "base_url": base_url,
