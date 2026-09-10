@@ -551,8 +551,7 @@ const failsafe = setInterval(() => {
   const hidden = document.querySelectorAll('.reveal:not(.in)');
   if (hidden.length === 0) { clearInterval(failsafe); return; }
   hidden.forEach(el => {
-    const top = el.getBoundingClientRect().top;
-    if (top > -innerHeight && top < innerHeight * 1.5) el.classList.add('in');
+    if (el.getBoundingClientRect().top < innerHeight * 1.5) el.classList.add('in');
   });
 }, 800);
 </script>
