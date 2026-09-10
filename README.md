@@ -2,6 +2,8 @@
 
 LLM API 延迟与速度检测工具。多服务商管理、跨服务商批量测速、定时测速、历史与统计可视化。
 
+**官网**：<https://john-walks-slow.github.io/token-speed/>
+
 ## 功能
 
 - **多服务商管理**：添加/编辑/删除服务商，检测并缓存模型列表。
@@ -33,6 +35,27 @@ npm run dev
 
 打开 http://localhost:5173。
 
+Linux 服务器常驻部署（前端构建后单进程， supervisord 示例）：
+
+```bash
+cd frontend && npm install && npm run build && cd ..
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+# 打开 http://127.0.0.1:8000（后端自动挂载 frontend/dist）
+```
+
+```ini
+[program:token-speed]
+command=/path/to/token-speed/.venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+directory=/path/to/token-speed
+autostart=true
+autorestart=true
+```
+
+## 官网
+
+产品官网源码在 `website/`（纯静态、零构建依赖），master 分支推送后由
+GitHub Actions 自动发布到 GitHub Pages。本地预览：`python -m http.server 8899 -d website`。
+
 ## 目录结构
 
 ```
@@ -47,6 +70,7 @@ frontend/src/
   App.tsx          # 布局 + 状态编排
   components/      # 测速/结果/统计/定时/服务商管理
   lib/             # api 封装、modelLabel（provider 展示名）
+website/           # 产品官网（静态站，GitHub Pages 发布）
 ```
 
 ## 数据库
