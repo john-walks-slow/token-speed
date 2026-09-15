@@ -13,14 +13,40 @@ import type {
 } from "../types";
 
 const BASE = "/api";
+const TOKEN_KEY = "admin_token";
+
+/** 管理密码 Bearer token：sessionStorage 持久化（会话内有效）。 */
+export function getAdminToken(): string {
+  return sessionStorage.getItem(TOKEN_KEY) ?? "";
+}
+
+export function setAdminToken(token: string): void {
+  if (token) sessionStorage.setItem(TOKEN_KEY, token);
+  else sessionStorage.removeItem(TOKEN_KEY);
+}
+
+export function clearAdminToken(): void {
+  sessionStorage.removeItem(TOKEN_KEY);
+}
+
+/** 401 认证失败：上层据此进入登录门或提示密码错误。 */
+export class AuthError extends Error {
+  status: number;
+  constructor(message: string, status = 401) {
+    super(message);
+    this.name = "AuthError";
+    this.status = status;
+  }
+}
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${url}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = getAdminToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${BASE}${url}`, { headers, ...options });
   if (!res.ok) {
     const text = await res.text();
+    if (res.status === 401) throw new AuthError(text || "需要管理密码");
     throw new Error(`API error (${res.status}): ${text}`);
   }
   return res.json();
@@ -130,6 +156,16 @@ export async function clearHistory(): Promise<void> {
 
 export async function getStats(): Promise<StatsResponse> {
   return request("/stats");
+}
+
+// ── Mode / Auth ───────────────────────────────────────────────
+
+export async function getMode(): Promise<{ mode: "full" | "dashboard" }> {
+  return request("/mode");
+}
+
+export async function getAuthStatus(): Promise<{ required: boolean }> {
+  return request("/auth/status");
 }
 
 // ── Provider API ──────────────────────────────────────────────
