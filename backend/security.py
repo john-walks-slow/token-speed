@@ -2,7 +2,8 @@
 
 未配置密码（`TOKEN_SPEED_ADMIN_PASSWORD`）时完全不要求认证，向后兼容；
 配置后所有 /api 中非只读集路径需 `Authorization: Bearer <password>`。
-只读集（mode/auth/status/stats/history GET）始终开放，供统计看板与免密统计使用。
+只读开放集（mode/auth/status/stats/history/schedules/providers-public GET）
+始终开放，供主端口匿名只读统计视图（DashboardApp）使用。
 """
 import hmac
 import os
@@ -14,7 +15,13 @@ from starlette.responses import JSONResponse
 _ENV_KEY = "TOKEN_SPEED_ADMIN_PASSWORD"
 
 # 只读开放集（精确匹配）：mode/auth/status/stats；history 系列单独前缀匹配。
-_OPEN_PATHS = ("/api/mode", "/api/auth/status", "/api/stats")
+_OPEN_PATHS = (
+    "/api/mode",
+    "/api/auth/status",
+    "/api/stats",
+    "/api/schedules",
+    "/api/providers/public",  # sanitize 版（api_key 置空），供匿名只读视图
+)
 
 
 def admin_password() -> str | None:

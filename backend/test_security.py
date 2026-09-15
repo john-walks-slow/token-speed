@@ -1,14 +1,16 @@
-"""管理密码中间件与独立看板 app 测试。
+"""管理密码中间件与单端口只读视图测试。
 
-覆盖：开放集判定、未配置密码放行、配置后 Bearer 校验、看板只读且 providers sanitize。
+覆盖：开放集判定、未配置密码放行、配置后 Bearer 校验、公开 providers sanitize、
+只读视图所需接口（schedules/stats/history）开放、完整 providers 受保护。
 """
+
+import asyncio
 
 import pytest
 from fastapi.testclient import TestClient
 
 from backend import database, security
 from backend.main import app as main_app
-from backend.dashboard import dashboard_app
 
 
 @pytest.fixture
@@ -34,11 +36,13 @@ def db(tmp_path):
         ("GET", "/api/auth/status", True),
         ("GET", "/api/history", True),
         ("GET", "/api/history/abc", True),
-        ("GET", "/api/providers", False),   # 管理 app 内受保护（含完整 key）
-        ("GET", "/api/schedules", False),   # 列表也受保护（泄露调度配置）
+        ("GET", "/api/schedules", True),        # 只读视图展示定时来源
+        ("GET", "/api/providers/public", True), # sanitize 版（api_key 空）
+        ("GET", "/api/providers", False),       # 完整版含 key，受保护
         ("GET", "/api/settings/network", False),
-        ("POST", "/api/stats", False),      # 非 GET 一律不开放
-        ("GET", "/", False),                # 非 /api 路径不参与（静态资源放行）
+        ("POST", "/api/stats", False),          # 非 GET 一律不开放
+        ("DELETE", "/api/history", False),
+        ("GET", "/", False),                    # 非 /api 路径不参与（静态资源放行）
     ],
 )
 def test_is_open_request(method, path, expected):
@@ -86,12 +90,25 @@ def test_accepts_correct_token(db, with_password):
     assert r.status_code in (200, 405)  # 放行即通过中间件
 
 
+def test_admin_providers_protected(db, with_password):
+    client = TestClient(main_app)
+    # 完整 providers（含 key）未认证时 401
+    r = client.get("/api/providers")
+    assert r.status_code == 401
+    # 配置密码后 sanitize 版仍开放
+    r = client.get("/api/providers/public")
+    assert r.status_code == 200
+
+
 def test_read_only_open_when_configured(db, with_password):
     client = TestClient(main_app)
     # 只读集在配置密码后仍开放（无需 token）
     r = client.get("/api/stats")
     assert r.status_code == 200
     assert r.json()["total_tests"] == 0
+
+    for path in ["/api/schedules", "/api/history"]:
+        assert client.get(path).status_code == 200
 
 
 def test_auth_status_reflects_configuration(db, with_password):
@@ -100,38 +117,25 @@ def test_auth_status_reflects_configuration(db, with_password):
     assert r.json() == {"required": True}
 
 
-# ── 看板 app：只读 + sanitize ──────────────────────────────────
+# ── 公开 providers：sanitize ───────────────────────────────────
 
 
-def test_dashboard_mode(db):
-    client = TestClient(dashboard_app)
-    r = client.get("/api/mode")
-    assert r.json() == {"mode": "dashboard"}
-
-
-def test_dashboard_stats_ok(db):
-    client = TestClient(dashboard_app)
-    assert client.get("/api/stats").status_code == 200
-
-
-def test_dashboard_providers_sanitized(db):
-    import asyncio
-
-    from backend.database import create_provider
-
-    asyncio.run(create_provider("p1", "https://api.example.com/v1", "sk-super-secret", ["gpt-4"]))
-    client = TestClient(dashboard_app)
-    r = client.get("/api/providers")
+def test_public_providers_sanitized(db, with_password):
+    asyncio.run(database.create_provider(
+        "p1", "https://api.example.com/v1", "sk-super-secret", ["gpt-4"]
+    ))
+    client = TestClient(main_app)
+    r = client.get("/api/providers/public")
     assert r.status_code == 200
     body = r.json()
     assert len(body["providers"]) == 1
     assert body["providers"][0]["api_key"] == ""  # sanitize
     assert body["providers"][0]["name"] == "p1"
 
+    # 完整版见不到密钥泄露给未认证方：受保护
+    assert client.get("/api/providers").status_code == 401
 
-def test_dashboard_has_no_admin_routes(db):
-    """按构造看板不含管理接口：providers POST / settings 均 405/404 而非可用。"""
-    client = TestClient(dashboard_app)
-    assert client.post("/api/providers", json={"name": "x", "base_url": "http://x"}).status_code == 405
-    assert client.delete("/api/history").status_code == 405
-    assert client.get("/api/settings/network").status_code == 404
+    # 登录后可取完整 key
+    r = client.get("/api/providers", headers={"Authorization": "Bearer secret"})
+    assert r.status_code == 200
+    assert r.json()["providers"][0]["api_key"] == "sk-super-secret"

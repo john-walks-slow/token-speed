@@ -329,7 +329,7 @@ async def clear_history():
 
 @read_router.get("/api/mode")
 async def mode():
-    """主应用模式标识；独立看板 app 返回 dashboard。"""
+    """主应用模式标识（单端口，始终 full）。"""
     return {"mode": "full"}
 
 
@@ -337,6 +337,15 @@ async def mode():
 async def auth_status():
     """前端判断是否需登录门：是否已配置管理密码。"""
     return {"required": bool(admin_password())}
+
+
+@read_router.get("/api/providers/public", response_model=ProviderListResponse)
+async def get_providers_public():
+    """sanitize 版 providers：仅供匿名只读统计视图（分组/命名/标签），api_key 一律清空。"""
+    providers = [ProviderResponse(**p) for p in await list_providers()]
+    for p in providers:
+        p.api_key = ""
+    return ProviderListResponse(providers=providers)
 
 
 @read_router.get("/api/stats", response_model=StatsResponse)

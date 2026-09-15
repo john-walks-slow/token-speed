@@ -168,6 +168,11 @@ export async function getAuthStatus(): Promise<{ required: boolean }> {
   return request("/auth/status");
 }
 
+/** sanitize 版 providers（api_key 空）：匿名只读统计视图用。 */
+export async function getPublicProviders(): Promise<ProviderListResponse> {
+  return request("/providers/public");
+}
+
 // ── Provider API ──────────────────────────────────────────────
 
 export async function getProviders(): Promise<ProviderListResponse> {

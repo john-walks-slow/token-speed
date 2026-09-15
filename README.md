@@ -35,25 +35,22 @@ npm run dev
 
 打开 http://localhost:5173。
 
-## 统计看板（独立端口）与管理密码
+## 管理密码（单端口只读 + 登录）
 
-应用默认仅绑定 `127.0.0.1`。可额外把**只读统计看板**（仅统计 + 历史，无任何管理功能，不暴露 API key）暴露到局域网：
+应用默认仅绑定 `127.0.0.1`，未配置密码时全功能即可用（向后兼容）。配置管理密码后，主端口未登录时直接展示**只读统计视图**（统计 + 历史，无任何管理功能，不暴露 API key）；登录后进入完整管理界面。
 
 | 环境变量 | 默认 | 说明 |
 |---|---|---|
-| `TOKEN_SPEED_DASHBOARD_HOST` | `0.0.0.0` | 看板绑定地址 |
-| `TOKEN_SPEED_DASHBOARD_PORT` | `8855` | 看板端口 |
-| `TOKEN_SPEED_DASHBOARD_DISABLED` | 空（启用） | 设 `1` 禁用看板 |
-| `TOKEN_SPEED_ADMIN_PASSWORD` | 未设 | 管理密码；配置后主应用的管理功能（服务商/定时/设置）需密码，统计/历史免密 |
-| `TOKEN_SPEED_ADMIN_PASSWORD`（桌面） | — | 也可用 `TokenSpeed.exe --admin-password X` / `--dashboard-port N` 传入 |
+| `TOKEN_SPEED_ADMIN_PASSWORD` | 未设 | 管理密码；配置后管理功能（服务商/定时/设置/删除等）需登录，统计/历史/只读视图免密 |
+| `TOKEN_SPEED_ADMIN_PASSWORD`（桌面） | — | 也可用 `TokenSpeed.exe --admin-password X` 传入 |
 
 **启动方式**：
 
-- **开发**：`start.bat` 起主应用（127.0.0.1:8000）；构建前端后 `python -m backend.server` 同时起主应用与看板（或用 `uvicorn backend.dashboard:app --host 0.0.0.0 --port 8855` 只起看板）。
-- **服务器部署**：`python -m backend.server`（同进程双服务器，主应用 127.0.0.1:8000 + 看板 0.0.0.0:8855，配置走环境变量）。
-- **桌面**：默认启动即起看板，托盘菜单「打开统计看板」直达。
+- **开发**：`start.bat` 起主应用（127.0.0.1:8000）。
+- **服务器部署**：单个 `uvicorn backend.main:app`（主应用 127.0.0.1:8000，配置走环境变量）。
+- **桌面**：窗口自动注入 `admin_password` 直达完整界面；若手动访问，未登录显示只读视图、右上角「管理登录」。
 
-手机/局域网浏览器访问 `http://<本机IP>:8855/` 查看只读统计看板。
+手机/局域网浏览器访问 `http://<本机IP>:8000/` 默认看到只读统计视图（管理接口仍需登录）。
 
 ## Linux 服务器常驻部署
 
@@ -83,18 +80,16 @@ GitHub Actions 自动发布到 GitHub Pages。本地预览：`python -m http.ser
 ```
 backend/
   main.py          # FastAPI 主应用路由（read_router 只读 / admin_router 管理）
-  dashboard.py     # 独立端口只读统计看板 app
   security.py      # 管理密码中间件
-  server.py        # 服务器部署入口（同进程双服务器）
   speed_test.py    # 测速核心（stream/non-stream，content 收集）
   scheduler.py     # 定时调度器
   database.py      # SQLite 访问 + schema 迁移
   rate_limit.py    # RPM 限流
   models.py        # Pydantic 模型
 frontend/src/
-  App.tsx          # 门控根组件（模式/登录判定）
+  App.tsx          # 门控根组件（登录判定：匿名只读 / 登录管理）
   FullApp.tsx      # 主应用布局 + 状态编排
-  DashboardApp.tsx # 只读统计看板
+  DashboardApp.tsx # 只读统计视图（未登录默认）
   components/      # 测速/结果/统计/定时/服务商管理
   lib/             # api 封装、modelLabel（provider 展示名）
 website/           # 产品官网（静态站，GitHub Pages 发布）

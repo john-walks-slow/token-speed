@@ -2,14 +2,13 @@ import { useEffect, useState } from "react";
 import FullApp from "./FullApp";
 import DashboardApp from "./DashboardApp";
 import LoginGate from "./components/LoginGate";
-import { getMode, getAuthStatus, getAdminToken, setAdminToken, clearAdminToken, getProviders } from "@/lib/api";
+import { getAuthStatus, getAdminToken, setAdminToken, clearAdminToken, getProviders } from "@/lib/api";
 import { Activity } from "lucide-react";
 
-type View = "loading" | "full" | "dashboard";
+type View = "loading" | "full" | "dashboard" | "login";
 
 export default function App() {
   const [view, setView] = useState<View>("loading");
-  const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
     // 桌面壳通过 URL ?admin_password=<pw> 自动注入管理密码（一次性，随后清理）
@@ -22,22 +21,20 @@ export default function App() {
       window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname + window.location.hash);
     }
 
-    getMode()
-      .then((m) => setView(m.mode === "dashboard" ? "dashboard" : "full"))
-      .catch(() => setView("full"));
     getAuthStatus()
       .then((s) => {
-        // 已配置密码且带 token：额外调一次受保护接口校验有效性（密码可能已被修改）
-        if (!s.required) return setAuthed(true);
-        if (!getAdminToken()) return setAuthed(false);
+        // 未配置密码 → 直接完整界面（向后兼容）
+        if (!s.required) return setView("full");
+        // 已配置密码：有 token 则校验一次；无 token → 匿名只读统计视图
+        if (!getAdminToken()) return setView("dashboard");
         getProviders()
-          .then(() => setAuthed(true))
+          .then(() => setView("full"))
           .catch(() => {
             clearAdminToken();
-            setAuthed(false);
+            setView("dashboard");
           });
       })
-      .catch(() => setAuthed(true));
+      .catch(() => setView("full"));
   }, []);
 
   if (view === "loading") {
@@ -48,15 +45,26 @@ export default function App() {
     );
   }
 
+  // 匿名只读统计视图（配置了密码但未登录）
   if (view === "dashboard") {
-    return <DashboardApp />;
+    return (
+      <DashboardApp
+        onLoginForAdmin={() => setView("login")}
+      />
+    );
   }
 
-  if (!authed) {
+  // 管理登录门（输入密码验证）
+  if (view === "login") {
     return (
       <LoginGate
-        onAuthed={() => setAuthed(true)}
-        onFail={() => clearAdminToken()}
+        onAuthed={() => {
+          setView("full");
+        }}
+        onFail={() => {
+          clearAdminToken();
+          setView("dashboard");
+        }}
       />
     );
   }
