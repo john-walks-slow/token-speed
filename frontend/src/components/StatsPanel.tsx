@@ -31,6 +31,38 @@ import {
 
 type Metric = "tps" | "total_latency_ms" | "ttft_ms" | "success_rate";
 
+/** 柱状图轴 tick：长文本超宽时省略号截断，而不是被裁剪/重叠。
+ *
+ * 横轴（X）居中显示；纵轴（Y）右对齐。超长时截断并带 <title> 悬浮全文。
+ */
+function ElidedTick({
+  x,
+  y,
+  payload,
+  width,
+  maxWidth = 140,
+  textAnchor = "middle",
+}: {
+  x?: number;
+  y?: number;
+  payload?: { value: string };
+  width?: number;
+  maxWidth?: number;
+  textAnchor?: "start" | "middle" | "end";
+}) {
+  const full = payload?.value ?? "";
+  const w = Math.min(width ?? maxWidth, maxWidth);
+  // 6.6 ≈ 11px 字号下每字符估算宽
+  const truncateLen = Math.max(1, Math.floor(w / 6.6) - 1);
+  const shown = full.length > truncateLen ? `${full.slice(0, truncateLen)}…` : full;
+  return (
+    <text x={x} y={y} fill="oklch(0.708 0 0)" fontSize={11} textAnchor={textAnchor} dy={4}>
+      <title>{full}</title>
+      {shown}
+    </text>
+  );
+}
+
 const METRIC_LABELS: Record<Metric, string> = {
   tps: "有效速度(tok/s)",
   total_latency_ms: "延迟(ms)",
@@ -92,16 +124,26 @@ const DAY_MS = 86_400_000;
 
 /** 成功率趋势的时间分桶大小，随时间范围缩放。 */
 function bucketSizeFor(range: TimeRangeValue): number {
-  if (range.type === "custom") return DAY_MS;
+  if (range.type === "custom") {
+    // 自定义区间：按跨度自适应分桶，分钟级起
+    const from = new Date(range.from).getTime();
+    const to = new Date(range.to).getTime();
+    if (Number.isNaN(from) || Number.isNaN(to)) return HOUR_MS;
+    const span = to - from;
+    if (span <= 2 * HOUR_MS) return 5 * MINUTE_MS;
+    if (span <= 24 * HOUR_MS) return HOUR_MS;
+    if (span <= 7 * DAY_MS) return 6 * HOUR_MS;
+    return DAY_MS;
+  }
   switch (range.key) {
     case "1h":
       return 5 * MINUTE_MS;
-    case "today":
+    case "8h":
+      return 15 * MINUTE_MS;
     case "24h":
       return HOUR_MS;
     case "7d":
       return 6 * HOUR_MS;
-    case "30d":
     case "all":
       return DAY_MS;
   }
@@ -112,18 +154,17 @@ function formatTime(ts: number, range: TimeRangeValue) {
   if (range.type === "preset") {
     switch (range.key) {
       case "1h":
+      case "8h":
       case "24h":
         return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
       case "7d":
         return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, "0")}:00`;
-      case "30d":
-        return `${d.getMonth() + 1}/${d.getDate()}`;
       default:
         return `${d.getFullYear()}/${d.getMonth() + 1}`;
     }
   }
-  // custom：按天刻度
-  return `${d.getMonth() + 1}/${d.getDate()}`;
+  // custom：按分钟刻度（精确到时刻）
+  return d.toLocaleString([], { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 interface Props {
@@ -138,7 +179,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
 
   // Filters
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
-  const [timeRange, setTimeRange] = useState<TimeRangeValue>({ type: "preset", key: "all" });
+  const [timeRange, setTimeRange] = useState<TimeRangeValue>({ type: "preset", key: "24h" });
   const [metric, setMetric] = useState<Metric>("tps");
   const [groupMode, setGroupMode] = useState<GroupMode>("actual");
   const [lastUpdated, setLastUpdated] = useState("");
@@ -596,9 +637,9 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
                       type="category"
                       dataKey="name"
                       width={140}
-                      tick={{ fill: "oklch(0.708 0 0)", fontSize: 11 }}
                       tickLine={false}
                       axisLine={false}
+                      tick={<ElidedTick maxWidth={140} textAnchor="end" />}
                     />
                     <Tooltip
                       contentStyle={{
@@ -633,9 +674,10 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
                     <XAxis
                       dataKey="name"
                       stroke="oklch(0.708 0 0)"
-                      fontSize={11}
                       tickLine={false}
                       axisLine={false}
+                      interval={0}
+                      tick={<ElidedTick />}
                     />
                     <YAxis stroke="oklch(0.708 0 0)" fontSize={11} tickLine={false} axisLine={false} />
                     <Tooltip

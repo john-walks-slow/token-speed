@@ -13,8 +13,13 @@ interface Props {
   allowCustom?: boolean;
 }
 
-/** 预设 key 的展示顺序（today 只适合结果页，统计页用它当「今天」）。 */
-const DEFAULT_PRESETS: PresetKey[] = ["1h", "24h", "7d", "30d", "all"];
+const DEFAULT_PRESETS: PresetKey[] = ["1h", "8h", "24h", "7d", "all"];
+
+/** 格式化 Date 为 datetime-local 输入值 `YYYY-MM-DDTHH:mm`。 */
+function fmtDateTime(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 export default function TimeRangeFilter({
   value,
@@ -35,13 +40,12 @@ export default function TimeRangeFilter({
 
   const openCustom = () => {
     setCustomOpen(true);
-    // 初始化 draft 为最近 7 天，并立即选中自定义
+    // 初始化 draft 为最近 8 小时，并立即选中自定义
     const to = new Date();
     const from = new Date();
-    from.setDate(from.getDate() - 7);
-    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    const fromStr = fmt(from);
-    const toStr = fmt(to);
+    from.setHours(from.getHours() - 8);
+    const fromStr = fmtDateTime(from);
+    const toStr = fmtDateTime(to);
     setDraft({ from: fromStr, to: toStr });
     onChange({ type: "custom", from: fromStr, to: toStr });
   };
@@ -72,9 +76,7 @@ export default function TimeRangeFilter({
           <button
             type="button"
             onClick={() => {
-              if (customOpen && value.type === "custom") {
-                // 已开：保持
-              } else {
+              if (!(customOpen && value.type === "custom")) {
                 openCustom();
               }
             }}
@@ -94,17 +96,17 @@ export default function TimeRangeFilter({
       {allowCustom && customOpen && (
         <div className="flex items-center gap-1.5 flex-wrap">
           <Input
-            type="date"
+            type="datetime-local"
             value={draft.from}
             onChange={(e) => applyCustom(e.target.value, draft.to)}
-            className="h-7 w-[140px] text-xs"
+            className="h-7 w-auto text-xs"
           />
           <span className="text-xs text-muted-foreground">→</span>
           <Input
-            type="date"
+            type="datetime-local"
             value={draft.to}
             onChange={(e) => applyCustom(draft.from, e.target.value)}
-            className="h-7 w-[140px] text-xs"
+            className="h-7 w-auto text-xs"
           />
         </div>
       )}

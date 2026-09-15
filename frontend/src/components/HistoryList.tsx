@@ -78,7 +78,7 @@ export default function HistoryList({ refreshKey, providers, readOnly = false }:
       <TimeRangeFilter
         value={timeRange}
         onChange={setTimeRange}
-        presets={["today", "7d", "30d", "all"]}
+        presets={["1h", "8h", "24h", "7d", "all"]}
       />
 
       {loading ? (
@@ -90,7 +90,7 @@ export default function HistoryList({ refreshKey, providers, readOnly = false }:
           {tests.length === 0 ? "暂无测速记录" : "当前时间范围内没有记录"}
         </p>
       ) : (
-        <div className="space-y-1.5 max-h-96 overflow-y-auto">
+        <div className="space-y-1.5">
           {filteredTests.map((t) => (
             <Card key={t.id} className="border-0 bg-card/30 group">
               <CardContent className="p-3 space-y-2">
