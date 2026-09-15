@@ -19,7 +19,11 @@ export default function ResultRow({ result: r, providers }: Props) {
     <div className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-md bg-card/60 text-sm">
       <div className="flex items-center gap-2 min-w-0">
         {r.success ? (
-          <Badge variant="success" className="text-[10px] px-1.5 shrink-0">
+          <Badge
+            variant="success"
+            className="text-[10px] px-1.5 shrink-0"
+            title="有效速度 = 产出 token / 请求总耗时（含思考和等待）"
+          >
             {r.tps !== null ? `${r.tps} tok/s` : "N/A"}
           </Badge>
         ) : (

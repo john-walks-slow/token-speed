@@ -126,7 +126,9 @@ export default function HistoryList({ refreshKey, providers }: Props) {
                     <ResponseContentView content={t.response_content} />
                     <span>TTFT {t.ttft_ms !== null ? `${t.ttft_ms}ms` : "N/A"}</span>
                     <span>{t.total_latency_ms}ms</span>
-                    <span>{t.tps !== null ? `${t.tps} tok/s` : "N/A"}</span>
+                    <span title="有效速度 = 产出 token / 请求总耗时（含思考和等待）">
+                      {t.tps !== null ? `${t.tps} tok/s` : "N/A"}
+                    </span>
                     {t.reasoning_tokens > 0 ? (
                       <span className="text-purple-400" title="reasoning / content tokens">
                         {t.reasoning_tokens}+{t.content_tokens}

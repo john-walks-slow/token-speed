@@ -125,6 +125,10 @@ def _get_conn():
                 _local.conn.execute(f"ALTER TABLE schedules ADD COLUMN {col_def}")
             except sqlite3.OperationalError:
                 pass  # column already exists
+        # 历史库 tps 口径回填（一次性）：新口径 = tokens_generated / 全程总耗时。
+        # 旧库多把 tps 算成“首个正文 token 之后的解码速率”，会漏掉 TTFT 内的思考耗时，
+        # 与当前定义冲突；只在缺少内容时回填，保证与未来新数据口径一致。
+        _backfill_tps(_local.conn)
         _local.conn.commit()
     return _local.conn
 
@@ -134,6 +138,22 @@ def _run(sql, params=None):
     cur = conn.execute(sql, params or ())
     conn.commit()
     return cur
+
+
+def _backfill_tps(conn) -> None:
+    """历史 tps 口径回填：新口径 = tokens_generated / total_latency_ms。
+
+    仅处理成功样本且 tokens_generated>0 且 total_latency_ms>0 的行，统一换算秒。
+    需在 _get_conn 的列迁移之后、commit 之前执行，且只在缺少内容时（表为空则跳过）。
+    """
+    try:
+        conn.execute(
+            """UPDATE speed_tests
+               SET tps = ROUND(tokens_generated / (total_latency_ms / 1000.0), 2)
+               WHERE success = 1 AND tokens_generated > 0 AND total_latency_ms > 0"""
+        )
+    except sqlite3.OperationalError:
+        pass  # speed_tests 表尚未创建（首启）时静默忽略
 
 
 def _fetchall(sql, params=None):

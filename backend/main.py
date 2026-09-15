@@ -168,7 +168,7 @@ def compute_summary(parsed: list[SpeedTestResult]) -> BatchSummary:
     groups: dict[tuple[str, str], list[SpeedTestResult]] = {}
     for r in successful:
         if r.tps is None:
-            continue  # 无生成速度（如 non-stream）不参与速度汇总
+            continue  # 无有效速度样本（如零 token 产出）不参与速度汇总
         groups.setdefault((r.base_url, r.model), []).append(r)
 
     reps = []
@@ -188,7 +188,7 @@ def compute_summary(parsed: list[SpeedTestResult]) -> BatchSummary:
         best_tps = best["tps"]
         best_base_url = best["base_url"]
     else:
-        # 无速度样本（如全 non-stream）：avg_tps/best_tps 置 None，前端显示 N/A，而非误显示 0
+        # 无速度样本（如全部零 token）：avg_tps/best_tps 置 None，前端显示 N/A，而非误显示 0
         avg_tps = None
         avg_lat = sum(r.total_latency_ms for r in successful) / len(successful) if successful else 0
         best_model = ""

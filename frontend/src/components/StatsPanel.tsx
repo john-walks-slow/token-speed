@@ -32,7 +32,7 @@ import {
 type Metric = "tps" | "total_latency_ms" | "ttft_ms" | "success_rate";
 
 const METRIC_LABELS: Record<Metric, string> = {
-  tps: "生成速度(tok/s)",
+  tps: "有效速度(tok/s)",
   total_latency_ms: "延迟(ms)",
   ttft_ms: "TTFT(ms)",
   success_rate: "成功率",
@@ -355,7 +355,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
     const byPair: Record<string, number[]> = {};
     filteredTests.filter(t => t.success).forEach(t => {
       const v = t[metric];
-      if (v === null || v === undefined) return; // TTFT/生成速度对 non-stream 为 null，跳过
+      if (v === null || v === undefined) return; // TTFT/有效速度对 non-stream 为 null，跳过
       const k = keyFor(t);
       if (k === null) return; // 解析模式下无有效 actual_model，忽略
       if (!byPair[k]) byPair[k] = [];
@@ -557,7 +557,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
           <MetricCard label="测试次数" value={cardStats.total} />
           <MetricCard label="成功率" value={`${cardStats.successRate}%`} />
           <MetricCard
-            label="中位生成速度"
+            label="中位有效速度"
             value={cardStats.avgTps !== null ? Math.round(cardStats.avgTps * 100) / 100 : "N/A"}
           />
           <MetricCard label="中位延迟" value={`${Math.round(cardStats.avgLatency)}ms`} />

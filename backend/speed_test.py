@@ -213,6 +213,7 @@ async def run_speed_test(
     actual_model = model
     # 流中是否出现过 reasoning 增量：决定 thinking_ms 是否可测（网关只转正文、
     # 仅在最终 usage 上报思考数时，思考耗时混入 TTFT，无法单独测量）
+    reasoning_seen = False
     reasoning_chunk_count = 0
     start = time.perf_counter()
 
@@ -246,8 +247,10 @@ async def run_speed_test(
                                     if first_token:
                                         ttft_ms = (time.perf_counter() - start) * 1000
                                         first_token = False
+                                    reasoning_seen = True
                                     reasoning_chunk_count += 1
                                 if ct:
+                                    # ttft = 首个可见 token（reasoning 或正文）；纯正文流时即首个正文
                                     if first_token:
                                         ttft_ms = (time.perf_counter() - start) * 1000
                                         first_token = False
@@ -271,12 +274,18 @@ async def run_speed_test(
                             except json.JSONDecodeError:
                                 continue
 
-            # Fallback to chunk counts if usage not provided（近似口径：chunk 数 ≈ token 数，
-            # 对按 chunk 批吐多 token 的端点会低估速度；多数端点加了 include_usage 后会返回 usage）
+            # usage 未在流中返回时会走 chunk 计数回退（近似，understanding 批吐多 token 的端点会低估 token 数）。
+            # 新口径下 tokens_generated 参与有效速度，只在确实没有任何 token 产出时置 None。
             if tokens_generated == 0:
+                # 以流中实际出现的 reasoning 增量划分：这批 chunk 数即 temp 量级，
+                # 若 reasoning 只在 post-usage chunk 中一次性上报而流内无增量，此处 reasoning 为 0，
+                # 与 usage 口径的数据可能不一致，但仅作临时回退，正常端点都会返回 usage，不影响常态。
                 reasoning_tokens = reasoning_chunk_count
                 content_tokens = content_chunk_count
-                tokens_generated = reasoning_chunk_count + content_chunk_count
+                if reasoning_chunk_count + content_chunk_count > 0:
+                    tokens_generated = reasoning_chunk_count + content_chunk_count
+                else:
+                    tokens_generated = 0
 
             response_content = "".join(content_parts) or None
             total_latency_ms = (time.perf_counter() - start) * 1000
@@ -304,16 +313,14 @@ async def run_speed_test(
             ttft_ms = None
             content_ttft_ms = None
 
-        # 回答阶段生成速度：排除 TTFT（content_ttft 起算）与 reasoning tokens/时长。
-        # 仅流式且能定位首个回答 token 时才有意义；否则 None（前端显示 N/A）。
-        if content_ttft_ms is not None and content_tokens > 0:
-            gen_time_s = max(total_latency_ms - content_ttft_ms, 0) / 1000
-            tps = (content_tokens / gen_time_s) if gen_time_s > 0 else None
-        else:
-            tps = None
+        # 有效速度：tokens_generated / 全程总耗时（含 TTFT）。
+        # 网关隐藏思考（不流式转发 reasoning）时 TTFT≈思考耗时，若只按"首 token 之后"算，
+        # 会把思考时间和思考 token 一起排除，得出发射速率（如 585 tok/s），偏离实际体感。
+        # 主流基准（llmperf/lmsys 等）的 tokens/sec 均按全程 (tokens / e2e latency) 定义。
+        tps = (tokens_generated / (total_latency_ms / 1000)) if tokens_generated > 0 else None
         # 思考耗时仅在流中出现过 reasoning 增量时才可测（ttft=首个 reasoning token，
         # content_ttft=首个正文 token）；否则网关只转正文，思考时间已混入 TTFT
-        if content_ttft_ms is not None and ttft_ms is not None and reasoning_chunk_count > 0:
+        if content_ttft_ms is not None and ttft_ms is not None and reasoning_seen:
             thinking_ms = content_ttft_ms - ttft_ms
         else:
             thinking_ms = None

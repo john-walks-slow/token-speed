@@ -1,7 +1,10 @@
 """测速指标口径单测：reasoning token 读取兼容、usage 口径统一、batch summary median 聚合。"""
+import sqlite3
+
 import pytest
 
 from backend.speed_test import _extract_reasoning_tokens, _reconcile_token_counts
+from backend.database import _backfill_tps
 from backend.main import compute_summary, _median
 from backend.models import SpeedTestResult
 
@@ -64,6 +67,45 @@ class TestReconcileTokenCounts:
     def test_reasoning_equals_completion(self):
         # 纯思考无正文（OpenAI 口径：completion=reasoning, content=0）
         assert _reconcile_token_counts(50, 50) == (50, 50, 0)
+
+
+class TestBackfillTps:
+    """历史库 tps 口径回填：旧库 tps 需统一为 tokens_generated / 全程总耗时。"""
+
+    @pytest.fixture
+    def conn(self):
+        c = sqlite3.connect(":memory:")
+        c.row_factory = sqlite3.Row
+        c.execute(
+            """CREATE TABLE speed_tests (
+                id TEXT PRIMARY KEY, model TEXT, tokens_generated INTEGER,
+                total_latency_ms REAL, tps REAL, success INTEGER)"""
+        )
+        yield c
+        c.close()
+
+    def test_recompute_success_rows(self, conn):
+        # success 行：tps 被重算为整体有效速度
+        conn.execute(
+            "INSERT INTO speed_tests VALUES ('a','m',100,20000,999,1)"
+        )
+        _backfill_tps(conn)
+        row = conn.execute("SELECT tps FROM speed_tests WHERE id='a'").fetchone()
+        assert row["tps"] == round(100 / 20, 2)  # 100 / (20000/1000) = 5
+
+    def test_skip_failed_or_zero(self, conn):
+        conn.execute("INSERT INTO speed_tests VALUES ('f','m',100,20000,999,0)")  # 失败
+        conn.execute("INSERT INTO speed_tests VALUES ('z','m',0,20000,999,1)")    # 无 token
+        _backfill_tps(conn)
+        for rid in ("f", "z"):
+            row = conn.execute("SELECT tps FROM speed_tests WHERE id=?", (rid,)).fetchone()
+            assert row["tps"] == 999  # 未更新
+
+    def test_skip_total_latency_zero(self, conn):
+        conn.execute("INSERT INTO speed_tests VALUES ('l','m',100,0,999,1)")
+        _backfill_tps(conn)
+        row = conn.execute("SELECT tps FROM speed_tests WHERE id='l'").fetchone()
+        assert row["tps"] == 999
 
 
 class TestMedian:
