@@ -91,9 +91,15 @@ export async function streamBatchSpeedTest(
   handlers: StreamHandlers,
   signal?: AbortSignal
 ): Promise<void> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+  };
+  const token = getAdminToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(`${BASE}/speed-test/batch-stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    headers,
     body: JSON.stringify(params),
     signal,
   });
