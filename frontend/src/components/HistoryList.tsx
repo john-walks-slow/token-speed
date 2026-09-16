@@ -114,7 +114,6 @@ export default function HistoryList({ refreshKey, providers, readOnly = false }:
                     </span>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    {!t.success && <ErrorMessageView message={t.error_message} />}
                     {!readOnly && (
                       <button
                         title="删除"
@@ -145,6 +144,13 @@ export default function HistoryList({ refreshKey, providers, readOnly = false }:
                     {t.thinking_ms !== null && t.thinking_ms > 0 && (
                       <span title="思考耗时">思考 {t.thinking_ms}ms</span>
                     )}
+                  </div>
+                )}
+
+                {!t.success && (
+                  <div className="flex items-center gap-2 text-xs text-destructive/80 border-t border-border/20 pt-2">
+                    <span className="truncate flex-1">{t.error_message || "失败"}</span>
+                    <ErrorMessageView message={t.error_message} />
                   </div>
                 )}
               </CardContent>

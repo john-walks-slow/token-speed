@@ -98,6 +98,14 @@ function median(nums: number[]): number {
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
 
+/** 统计取值：tps 指标下失败样本计 0（而非忽略），体现失败惩罚；
+ * 其余指标（延迟/TTFT）失败样本返回 null（跳过）。成功样本该指标为 null 也不计入。 */
+function metricValue(t: TestHistory, metric: Exclude<Metric, "success_rate">): number | null {
+  if (!t.success) return metric === "tps" ? 0 : null;
+  const v = t[metric];
+  return typeof v === "number" ? v : null;
+}
+
 const MODEL_COLORS = [
   "oklch(0.922 0.176 149.238)",   // green
   "oklch(0.688 0.162 258.338)",   // blue
@@ -341,10 +349,11 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
   // 时间序列：按 (provider, model) 对分组（仅数值指标；成功率用 successRateSeries 分桶）
   const timeSeriesByPair = useMemo(() => {
     if (isSuccessRate) return {};
+    const m = metric as Exclude<Metric, "success_rate">;
     const byPair: Record<string, { time: number; value: number }[]> = {};
-    filteredTests.filter(t => t.success).forEach(t => {
-      const v = t[metric];
-      if (v === null || v === undefined) return; // TTFT 对 non-stream 为 null，跳过
+    filteredTests.forEach(t => {
+      const v = metricValue(t, m);
+      if (v === null) return; // 非 tps 指标失败样本 / non-stream 无值，跳过
       const k = keyFor(t);
       if (k === null) return; // 解析模式下无有效 actual_model，忽略
       if (!byPair[k]) byPair[k] = [];
@@ -393,10 +402,11 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
   // 模型对比：按对，组内取 median(P50)（仅数值指标；成功率用 successRateData）
   const modelComparison = useMemo(() => {
     if (isSuccessRate) return [];
+    const m = metric as Exclude<Metric, "success_rate">;
     const byPair: Record<string, number[]> = {};
-    filteredTests.filter(t => t.success).forEach(t => {
-      const v = t[metric];
-      if (v === null || v === undefined) return; // TTFT/有效速度对 non-stream 为 null，跳过
+    filteredTests.forEach(t => {
+      const v = metricValue(t, m);
+      if (v === null) return; // 非 tps 指标失败样本 / 无值，跳过
       const k = keyFor(t);
       if (k === null) return; // 解析模式下无有效 actual_model，忽略
       if (!byPair[k]) byPair[k] = [];
