@@ -31,7 +31,7 @@ import {
 
 type Metric = "tps" | "total_latency_ms" | "ttft_ms" | "success_rate";
 
-/** 柱状图轴 tick：长文本按固定字符数省略号截断，避免重叠；hover 显示全文。
+/** 柱状图轴 tick：长文本按固定字符数省略号截断（用双点 ‥），避免重叠；hover 显示全文。
  *
  * recharts 不把 band 宽度传给自定义 tick，故按保守字符上限截断。
  * 横轴（X）居中、纵轴（Y）右对齐。
@@ -41,7 +41,7 @@ function ElidedTick({
   y,
   payload,
   textAnchor = "middle",
-  maxChars = 16,
+  maxChars = 9,
 }: {
   x?: number;
   y?: number;
@@ -50,7 +50,7 @@ function ElidedTick({
   maxChars?: number;
 }) {
   const full = payload?.value ?? "";
-  const shown = full.length > maxChars ? `${full.slice(0, maxChars - 1)}…` : full;
+  const shown = full.length > maxChars ? `${full.slice(0, maxChars - 2)}‥` : full;
   return (
     <text x={x} y={y} fill="oklch(0.708 0 0)" fontSize={11} textAnchor={textAnchor} dy={4}>
       <title>{full}</title>
@@ -645,7 +645,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
                       width={140}
                       tickLine={false}
                       axisLine={false}
-                      tick={<ElidedTick textAnchor="end" maxChars={18} />}
+                      tick={<ElidedTick textAnchor="end" maxChars={9} />}
                     />
                     <Tooltip
                       contentStyle={{
@@ -683,7 +683,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
                       tickLine={false}
                       axisLine={false}
                       interval={0}
-                      tick={<ElidedTick maxChars={10} />}
+                      tick={<ElidedTick maxChars={9} />}
                     />
                     <YAxis stroke="oklch(0.708 0 0)" fontSize={11} tickLine={false} axisLine={false} />
                     <Tooltip
