@@ -403,7 +403,7 @@ def _schedule_response(s: dict) -> ScheduleResponse:
         interval_minutes=s["interval_minutes"],
         targets=[ScheduleTarget(**t) for t in s.get("targets", [])],
         prompt=s.get("prompt") or "",
-        max_tokens=s.get("max_tokens") or 256,
+        max_tokens=s.get("max_tokens"),
         temperature=s.get("temperature") if s.get("temperature") is not None else 0.7,
         stream=bool(s.get("stream")),
         concurrency=s.get("concurrency") or 1,

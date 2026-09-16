@@ -155,7 +155,7 @@ async def run_speed_test(
     api_key: str = "",
     model: str = "",
     prompt: str = "Hello, tell me a short story in 3 sentences.",
-    max_tokens: int = 256,
+    max_tokens: int | None = None,
     temperature: float = 0.7,
     stream: bool = False,
     provider_id: str = "",
@@ -167,6 +167,7 @@ async def run_speed_test(
     base_url 需自带路径（含 /v1 等），不再自动拼接。
     protocol=anthropic 时请求 {base}/messages，用 x-api-key + anthropic-version，
     且不发送 temperature（Anthropic 4.7+ 模型已移除该参数，省略最稳妥）。
+    max_tokens 为 None 时不发送该字段，由上游用自身默认上限。
     """
     base = normalize_base_url(base_url)
     if protocol == "anthropic":
@@ -180,9 +181,10 @@ async def run_speed_test(
         payload: dict = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": max_tokens,
             "stream": stream,
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
     else:
         url = f"{base}/chat/completions"
         headers = {
@@ -193,10 +195,11 @@ async def run_speed_test(
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": max_tokens,
             "temperature": temperature,
             "stream": stream,
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
         if stream:
             # 多数 OpenAI-compatible 端点默认不返回流式 usage，追加 include_usage 以拿到准确 token 数。
             # 个别不识别该字段的端点会忽略它（OpenAI 兼容约定），不影响请求。
@@ -379,7 +382,7 @@ async def run_speed_test(
 async def execute_batch_tests(
     tests: list[dict],
     prompt: str,
-    max_tokens: int,
+    max_tokens: int | None,
     temperature: float,
     stream: bool,
     concurrency: int,
@@ -446,7 +449,7 @@ async def execute_batch_tests(
     return results
 
 
-def _batch_error_result(exc: BaseException, item: dict, prompt: str, max_tokens: int, temperature: float) -> dict:
+def _batch_error_result(exc: BaseException, item: dict, prompt: str, max_tokens: int | None, temperature: float) -> dict:
     """构造批量测速的失败兜底结果。"""
     return {
         "id": str(uuid.uuid4()),

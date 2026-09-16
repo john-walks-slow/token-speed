@@ -18,7 +18,7 @@ export interface SpeedTestResult {
   provider_name?: string | null;
   response_content?: string | null;
   prompt: string;
-  max_tokens: number;
+  max_tokens: number | null;
   temperature: number;
   ttft_ms: number | null;
   content_ttft_ms: number | null;
@@ -110,7 +110,7 @@ export interface Schedule {
   interval_minutes: number;
   targets: ScheduleTarget[];
   prompt: string;
-  max_tokens: number;
+  max_tokens: number | null;
   temperature: number;
   stream: boolean;
   concurrency: number;
@@ -131,7 +131,7 @@ export interface ScheduleCreate {
   interval_minutes: number;
   targets: ScheduleTarget[];
   prompt: string;
-  max_tokens: number;
+  max_tokens: number | null;
   temperature: number;
   stream: boolean;
   concurrency: number;

@@ -409,7 +409,7 @@ async def create_schedule(
     interval_minutes: int,
     targets: list[dict],
     prompt: str,
-    max_tokens: int,
+    max_tokens: int | None,
     temperature: float,
     stream: bool,
     concurrency: int,

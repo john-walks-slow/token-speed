@@ -125,7 +125,7 @@ export default function FullApp() {
   const handleRunTest = useCallback(
     async (params: {
       prompt: string;
-      maxTokens: number;
+      maxTokens: number | null;
       temperature: number;
       concurrency: number;
       iterations: number;
