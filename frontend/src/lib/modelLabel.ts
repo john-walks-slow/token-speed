@@ -80,3 +80,22 @@ export function modelDisplayLabel(
   }
   return rec.model;
 }
+
+/** 模型展示名（含实际解析 id）：网关重定向模型时显示「输入（实际）」，相同时只显示输入。 */
+export function modelDisplayLabelResolved(
+  providers: Provider[],
+  rec: {
+    model: string;
+    actual_model?: string | null;
+    provider_id?: string | null;
+    provider_name?: string | null;
+    base_url?: string;
+  }
+): string {
+  const label = modelDisplayLabel(providers, rec);
+  const actual = rec.actual_model;
+  if (actual && actual !== rec.model && actual !== "error") {
+    return `${label}（${actual}）`;
+  }
+  return label;
+}

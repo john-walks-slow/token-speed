@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getHistory, deleteHistoryItem, clearHistory, getSchedules } from "@/lib/api";
 import type { Provider, TestHistory } from "@/types";
-import { modelDisplayLabel } from "@/lib/modelLabel";
+import { modelDisplayLabelResolved } from "@/lib/modelLabel";
 import ResponseContentView from "@/components/ResponseContentView";
 import FailureInfo from "@/components/FailureInfo";
 import TimeRangeFilter from "@/components/TimeRangeFilter";
@@ -100,7 +100,7 @@ export default function HistoryList({ refreshKey, providers, readOnly = false }:
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                     ) : null}
                     <span className="text-sm truncate">
-                      {modelDisplayLabel(providers, t)}
+                      {modelDisplayLabelResolved(providers, t)}
                     </span>
                     {t.schedule_id && (
                       <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
