@@ -60,7 +60,7 @@ class SpeedTestResult(BaseModel):
     provider_name: Optional[str] = None
     response_content: Optional[str] = None
     prompt: str
-    max_tokens: int
+    max_tokens: Optional[int] = None
     temperature: float
     ttft_ms: Optional[float] = None
     content_ttft_ms: Optional[float] = None
