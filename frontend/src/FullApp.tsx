@@ -126,7 +126,7 @@ export default function FullApp() {
     async (params: {
       prompt: string;
       maxTokens: number | null;
-      temperature: number;
+      temperature: number | null;
       concurrency: number;
       iterations: number;
       stream: boolean;
@@ -183,7 +183,7 @@ export default function FullApp() {
             response_content: null,
             prompt: "",
             max_tokens: 0,
-            temperature: 0,
+            temperature: null,
             ttft_ms: null,
             content_ttft_ms: null,
             total_latency_ms: 0,

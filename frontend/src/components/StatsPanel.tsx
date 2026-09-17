@@ -94,6 +94,13 @@ function median(nums: number[]): number {
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
 
+/** token 数紧凑展示：1234 → 1.2k，1234567 → 1.2M。 */
+function formatTokenCount(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
 /** 统计取值：tps 指标下失败样本计 0（而非忽略），体现失败惩罚；
  * 其余指标（延迟/TTFT）失败样本返回 null（跳过）。成功样本该指标为 null 也不计入。 */
 function metricValue(t: TestHistory, metric: Exclude<Metric, "success_rate">): number | null {
@@ -332,11 +339,16 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
     const total = filteredTests.length;
     if (total === 0) return null;
     const tpsVals = success.filter(t => t.tps !== null).map(t => t.tps as number);
+    const inputSum = success.reduce((acc, t) => acc + (t.input_tokens ?? 0), 0);
+    const outputSum = success.reduce((acc, t) => acc + t.tokens_generated, 0);
     return {
       total,
       successRate: total > 0 ? Math.round((success.length / total) * 100) : 0,
       avgTps: tpsVals.length > 0 ? median(tpsVals) : null,
       avgLatency: success.length > 0 ? median(success.map(t => t.total_latency_ms)) : 0,
+      tokensIn: inputSum,
+      tokensOut: outputSum,
+      tokensKnown: success.some(t => t.input_tokens != null),
     };
   }, [filteredTests]);
 
@@ -600,7 +612,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
 
       {/* ── Aggregate Cards ── */}
       {cardStats && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <MetricCard label="测试次数" value={cardStats.total} />
           <MetricCard label="成功率" value={`${cardStats.successRate}%`} />
           <MetricCard
@@ -608,6 +620,11 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
             value={cardStats.avgTps !== null ? Math.round(cardStats.avgTps * 100) / 100 : "N/A"}
           />
           <MetricCard label="中位延迟" value={`${Math.round(cardStats.avgLatency)}ms`} />
+          <MetricCard
+            label="Token 消耗"
+            value={formatTokenCount(cardStats.tokensIn + cardStats.tokensOut)}
+            sub={`↑${formatTokenCount(cardStats.tokensIn)} ↓${formatTokenCount(cardStats.tokensOut)}${cardStats.tokensKnown ? "" : "（旧数据无输入记录）"}`}
+          />
         </div>
       )}
 
@@ -874,15 +891,18 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
 function MetricCard({
   label,
   value,
+  sub,
 }: {
   label: string;
   value: string | number;
+  sub?: string;
 }) {
   return (
     <Card className="border-0 bg-card/50">
       <CardContent className="p-3 text-center">
         <p className="text-xs text-muted-foreground">{label}</p>
         <p className="text-lg font-semibold tabular-nums mt-0.5">{value}</p>
+        {sub && <p className="text-[10px] text-muted-foreground tabular-nums">{sub}</p>}
       </CardContent>
     </Card>
   );

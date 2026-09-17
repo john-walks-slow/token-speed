@@ -19,7 +19,8 @@ export interface SpeedTestResult {
   response_content?: string | null;
   prompt: string;
   max_tokens: number | null;
-  temperature: number;
+  input_tokens?: number | null;
+  temperature: number | null;
   ttft_ms: number | null;
   content_ttft_ms: number | null;
   total_latency_ms: number;
@@ -56,6 +57,7 @@ export interface TestHistory {
   tokens_generated: number;
   reasoning_tokens: number;
   content_tokens: number;
+  input_tokens?: number | null;
   thinking_ms: number | null;
   tps: number | null;
   success: boolean;
@@ -111,7 +113,7 @@ export interface Schedule {
   targets: ScheduleTarget[];
   prompt: string;
   max_tokens: number | null;
-  temperature: number;
+  temperature: number | null;
   stream: boolean;
   concurrency: number;
   iterations: number;
@@ -132,7 +134,7 @@ export interface ScheduleCreate {
   targets: ScheduleTarget[];
   prompt: string;
   max_tokens: number | null;
-  temperature: number;
+  temperature: number | null;
   stream: boolean;
   concurrency: number;
   iterations: number;

@@ -26,7 +26,7 @@ class SpeedTestRequest(BaseModel):
     model: str
     prompt: str = "Hello, tell me a short story in 3 sentences."
     max_tokens: Optional[int] = None
-    temperature: float = 0.7
+    temperature: Optional[float] = None
     stream: bool = False
     protocol: str = "openai"
 
@@ -44,7 +44,7 @@ class BatchSpeedTestRequest(BaseModel):
     tests: list[BatchSpeedTestItem]
     prompt: str = "Hello, tell me a short story in 3 sentences."
     max_tokens: Optional[int] = None
-    temperature: float = 0.7
+    temperature: Optional[float] = None
     concurrency: int = 1
     iterations: int = 1
     stream: bool = False
@@ -61,13 +61,14 @@ class SpeedTestResult(BaseModel):
     response_content: Optional[str] = None
     prompt: str
     max_tokens: Optional[int] = None
-    temperature: float
+    temperature: Optional[float] = None
     ttft_ms: Optional[float] = None
     content_ttft_ms: Optional[float] = None
     total_latency_ms: float
     tokens_generated: int
     reasoning_tokens: int = 0
     content_tokens: int = 0
+    input_tokens: Optional[int] = None
     thinking_ms: Optional[float] = None
     tps: Optional[float] = None
     success: bool
@@ -100,6 +101,7 @@ class SpeedTestHistory(BaseModel):
     tokens_generated: int
     reasoning_tokens: int = 0
     content_tokens: int = 0
+    input_tokens: Optional[int] = None
     thinking_ms: Optional[float] = None
     tps: Optional[float] = None
     success: bool
@@ -178,7 +180,7 @@ class ScheduleCreate(BaseModel):
     targets: list[ScheduleTarget]
     prompt: str = "Hello, tell me a short story in 3 sentences."
     max_tokens: Optional[int] = None
-    temperature: float = 0.7
+    temperature: Optional[float] = None
     stream: bool = True
     concurrency: int = 1
     iterations: int = 1
@@ -206,7 +208,7 @@ class ScheduleResponse(BaseModel):
     targets: list[ScheduleTarget] = []
     prompt: str = ""
     max_tokens: Optional[int] = None
-    temperature: float = 0.7
+    temperature: Optional[float] = None
     stream: bool = True
     concurrency: int = 1
     iterations: int = 1

@@ -96,6 +96,7 @@ def _get_conn():
             "reasoning_tokens INTEGER DEFAULT 0",
             "content_tokens INTEGER DEFAULT 0",
             "thinking_ms REAL",
+            "input_tokens INTEGER",
             "schedule_id TEXT",
             "provider_id TEXT",
             "provider_name TEXT",
@@ -186,8 +187,8 @@ async def insert_speed_test(result: dict, schedule_id: str | None = None) -> Non
             ttft_ms, content_ttft_ms, total_latency_ms, tokens_generated,
             reasoning_tokens, content_tokens, thinking_ms, tps,
             success, error_message, created_at, schedule_id,
-            provider_id, provider_name, response_content)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            provider_id, provider_name, response_content, input_tokens)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             result["id"],
             result["base_url"],
@@ -211,6 +212,7 @@ async def insert_speed_test(result: dict, schedule_id: str | None = None) -> Non
             result.get("provider_id"),
             result.get("provider_name"),
             result.get("response_content"),
+            result.get("input_tokens", 0),
         ),
     )
 
@@ -410,7 +412,7 @@ async def create_schedule(
     targets: list[dict],
     prompt: str,
     max_tokens: int | None,
-    temperature: float,
+    temperature: float | None,
     stream: bool,
     concurrency: int,
     iterations: int,

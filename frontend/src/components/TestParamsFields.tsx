@@ -5,7 +5,7 @@ import { FlaskConical } from "lucide-react";
 export interface TestParamsValues {
   prompt: string;
   maxTokens: number | null;
-  temperature: number;
+  temperature: number | null;
   concurrency: number;
   iterations: number;
   stream: boolean;
@@ -15,7 +15,7 @@ export interface TestParamsValues {
 export const DEFAULT_PARAMS: TestParamsValues = {
   prompt: "Hello, tell me a short story in 3 sentences.",
   maxTokens: null,
-  temperature: 0.7,
+  temperature: null,
   concurrency: 1,
   iterations: 1,
   stream: true,
@@ -89,7 +89,15 @@ export default function TestParamsFields({ values, onChange, persist = true }: P
         </div>
         <div className="space-y-1.5">
           <label className="text-xs text-muted-foreground">Temperature</label>
-          <Input type="number" min={0} max={2} step={0.1} value={values.temperature} onChange={(e) => set({ temperature: Number(e.target.value) })} />
+          <Input
+            type="number"
+            min={0}
+            max={2}
+            step={0.1}
+            value={values.temperature ?? ""}
+            placeholder="默认"
+            onChange={(e) => set({ temperature: e.target.value === "" ? null : Number(e.target.value) })}
+          />
         </div>
         <div className="space-y-1.5">
           <label className="text-xs text-muted-foreground">并发数</label>

@@ -144,6 +144,9 @@ export default function HistoryList({ refreshKey, providers, readOnly = false }:
                     {t.thinking_ms !== null && t.thinking_ms > 0 && (
                       <span title="思考耗时">思考 {t.thinking_ms}ms</span>
                     )}
+                    <span title={`输入 ${t.input_tokens ?? "?"} / 输出 ${t.tokens_generated} tokens`}>
+                      ↑{t.input_tokens ?? "?"} ↓{t.tokens_generated}
+                    </span>
                   </div>
                 )}
 

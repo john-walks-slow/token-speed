@@ -129,7 +129,7 @@ class SpeedTestScheduler:
                 tests,
                 prompt=sched["prompt"] or "",
                 max_tokens=sched["max_tokens"],
-                temperature=sched["temperature"] if sched["temperature"] is not None else 0.7,
+                temperature=sched["temperature"],
                 stream=bool(sched["stream"]),
                 concurrency=sched["concurrency"] or 1,
                 iterations=sched["iterations"] or 1,

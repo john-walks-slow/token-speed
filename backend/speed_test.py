@@ -57,6 +57,15 @@ def _extract_reasoning_tokens(usage: dict) -> int:
         return 0
 
 
+def _extract_input_tokens(usage: dict, protocol: str) -> int:
+    """从 usage 读取输入 token 数。OpenAI: prompt_tokens；Anthropic: input_tokens。"""
+    if not isinstance(usage, dict):
+        return 0
+    key = "input_tokens" if protocol == "anthropic" else "prompt_tokens"
+    val = usage.get(key)
+    return val if isinstance(val, int) and val > 0 else 0
+
+
 async def _raise_for_openai_error(resp: httpx.Response) -> None:
     """OpenAI 兼容端点非 2xx 时，读取响应体 error.message 提升异常信息。
 
@@ -156,7 +165,7 @@ async def run_speed_test(
     model: str = "",
     prompt: str = "Hello, tell me a short story in 3 sentences.",
     max_tokens: int | None = None,
-    temperature: float = 0.7,
+    temperature: float | None = None,
     stream: bool = False,
     provider_id: str = "",
     provider_name: str = "",
@@ -168,6 +177,7 @@ async def run_speed_test(
     protocol=anthropic 时请求 {base}/messages，用 x-api-key + anthropic-version，
     且不发送 temperature（Anthropic 4.7+ 模型已移除该参数，省略最稳妥）。
     max_tokens 为 None 时不发送该字段，由上游用自身默认上限。
+    temperature 为 None 时不发送该字段（部分模型仅允许默认值 1）。
     """
     base = normalize_base_url(base_url)
     if protocol == "anthropic":
@@ -195,9 +205,10 @@ async def run_speed_test(
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": temperature,
             "stream": stream,
         }
+        if temperature is not None:
+            payload["temperature"] = temperature
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
         if stream:
@@ -213,6 +224,7 @@ async def run_speed_test(
     tokens_generated = 0
     reasoning_tokens = 0
     content_tokens = 0
+    input_tokens = 0
     actual_model = model
     # 流中是否出现过 reasoning 增量：决定 thinking_ms 是否可测（网关只转正文、
     # 仅在最终 usage 上报思考数时，思考耗时混入 TTFT，无法单独测量）
@@ -264,6 +276,7 @@ async def run_speed_test(
                                     content_parts.append(ct)
                                 usage = fields["usage"]
                                 if usage:
+                                    input_tokens = _extract_input_tokens(usage, protocol)
                                     if protocol == "anthropic":
                                         # Anthropic 原生 usage 不拆分思考 token
                                         tokens_generated = usage.get("output_tokens", 0) or 0
@@ -300,6 +313,7 @@ async def run_speed_test(
 
             total_latency_ms = (time.perf_counter() - start) * 1000
             usage = data.get("usage", {})
+            input_tokens = _extract_input_tokens(usage, protocol)
             if protocol == "anthropic":
                 tokens_generated = usage.get("output_tokens", 0) or 0
                 content_tokens = tokens_generated  # Anthropic usage 不拆分思考 token
@@ -345,6 +359,7 @@ async def run_speed_test(
             "tokens_generated": tokens_generated,
             "reasoning_tokens": reasoning_tokens,
             "content_tokens": content_tokens,
+            "input_tokens": input_tokens,
             "thinking_ms": round(thinking_ms, 2) if thinking_ms is not None else None,
             "tps": round(tps, 2) if tps is not None else None,
             "success": True,
@@ -371,6 +386,7 @@ async def run_speed_test(
             "tokens_generated": 0,
             "reasoning_tokens": 0,
             "content_tokens": 0,
+            "input_tokens": 0,
             "thinking_ms": None,
             "tps": None,
             "success": False,
@@ -383,7 +399,7 @@ async def execute_batch_tests(
     tests: list[dict],
     prompt: str,
     max_tokens: int | None,
-    temperature: float,
+    temperature: float | None,
     stream: bool,
     concurrency: int,
     iterations: int,
@@ -449,7 +465,7 @@ async def execute_batch_tests(
     return results
 
 
-def _batch_error_result(exc: BaseException, item: dict, prompt: str, max_tokens: int | None, temperature: float) -> dict:
+def _batch_error_result(exc: BaseException, item: dict, prompt: str, max_tokens: int | None, temperature: float | None) -> dict:
     """构造批量测速的失败兜底结果。"""
     return {
         "id": str(uuid.uuid4()),
@@ -462,6 +478,7 @@ def _batch_error_result(exc: BaseException, item: dict, prompt: str, max_tokens:
         "content_ttft_ms": None,
         "reasoning_tokens": 0,
         "content_tokens": 0,
+        "input_tokens": 0,
         "prompt": prompt,
         "max_tokens": max_tokens,
         "temperature": temperature,

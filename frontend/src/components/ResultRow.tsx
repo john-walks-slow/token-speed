@@ -50,7 +50,9 @@ export default function ResultRow({ result: r, providers }: Props) {
             {r.thinking_ms !== null && r.thinking_ms > 0 && (
               <span title="思考耗时">思考 {r.thinking_ms}ms</span>
             )}
-            <span>{r.tokens_generated} tokens</span>
+            <span title={`输入 ${r.input_tokens ?? "?"} / 输出 ${r.tokens_generated} tokens`}>
+              ↑{r.input_tokens ?? "?"} ↓{r.tokens_generated}
+            </span>
           </>
         ) : (
           <span className="flex items-center gap-1.5 text-destructive/80">

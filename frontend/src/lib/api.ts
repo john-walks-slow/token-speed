@@ -82,7 +82,7 @@ export async function streamBatchSpeedTest(
     tests: { model: string; base_url: string; api_key: string; protocol?: string }[];
     prompt: string;
     max_tokens: number | null;
-    temperature: number;
+    temperature: number | null;
     concurrency: number;
     iterations: number;
     stream: boolean;
