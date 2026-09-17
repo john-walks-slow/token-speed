@@ -6,10 +6,10 @@ import { getHistory, deleteHistoryItem, clearHistory, getSchedules } from "@/lib
 import type { Provider, TestHistory } from "@/types";
 import { modelDisplayLabel } from "@/lib/modelLabel";
 import ResponseContentView from "@/components/ResponseContentView";
-import ErrorMessageView from "@/components/ErrorMessageView";
+import FailureInfo from "@/components/FailureInfo";
 import TimeRangeFilter from "@/components/TimeRangeFilter";
 import { filterTestsByRange, type TimeRangeValue } from "@/lib/timeRange";
-import { Trash2, X, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { Trash2, X, CheckCircle2, Loader2 } from "lucide-react";
 
 interface Props {
   refreshKey: number;
@@ -98,9 +98,7 @@ export default function HistoryList({ refreshKey, providers, readOnly = false }:
                   <div className="flex items-center gap-2 min-w-0">
                     {t.success ? (
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    ) : (
-                      <XCircle className="w-3.5 h-3.5 text-destructive shrink-0" />
-                    )}
+                    ) : null}
                     <span className="text-sm truncate">
                       {modelDisplayLabel(providers, t)}
                     </span>
@@ -151,9 +149,8 @@ export default function HistoryList({ refreshKey, providers, readOnly = false }:
                 )}
 
                 {!t.success && (
-                  <div className="flex items-center gap-2 text-xs text-destructive/80 border-t border-border/20 pt-2">
-                    <span className="truncate flex-1">{t.error_message || "失败"}</span>
-                    <ErrorMessageView message={t.error_message} />
+                  <div className="border-t border-border/20 pt-2">
+                    <FailureInfo message={t.error_message} />
                   </div>
                 )}
               </CardContent>

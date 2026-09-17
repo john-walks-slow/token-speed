@@ -1,9 +1,8 @@
 import { Badge } from "@/components/ui/badge";
-import { XCircle } from "lucide-react";
 import type { Provider, SpeedTestResult } from "@/types";
 import { modelDisplayLabel } from "@/lib/modelLabel";
 import ResponseContentView from "@/components/ResponseContentView";
-import ErrorMessageView from "@/components/ErrorMessageView";
+import FailureInfo from "@/components/FailureInfo";
 
 interface Props {
   result: SpeedTestResult;
@@ -26,9 +25,7 @@ export default function ResultRow({ result: r, providers }: Props) {
           >
             {r.tps !== null ? `${r.tps} tok/s` : "N/A"}
           </Badge>
-        ) : (
-          <XCircle className="w-3.5 h-3.5 text-destructive shrink-0" />
-        )}
+        ) : null}
         <span className="truncate font-medium">{label}</span>
         {r.actual_model && r.actual_model !== r.model && (
           <Badge variant="outline" className="text-[10px] px-1.5 text-amber-400 border-amber-400/30 shrink-0">
@@ -55,10 +52,9 @@ export default function ResultRow({ result: r, providers }: Props) {
             </span>
           </>
         ) : (
-          <span className="flex items-center gap-1.5 text-destructive/80">
-            <span className="max-w-60 truncate">{r.error_message || "失败"}</span>
-            <ErrorMessageView message={r.error_message} />
-          </span>
+          <div className="flex-1 flex justify-end min-w-0">
+            <FailureInfo message={r.error_message} />
+          </div>
         )}
       </div>
     </div>
