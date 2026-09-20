@@ -15,7 +15,9 @@ LLM API 延迟与速度检测工具：多服务商管理、跨模型批量测速
 - `frontend/src/App.tsx` — 布局 + 状态编排；`components/` 各面板
 - `frontend/src/components/StatsPanel.tsx` — 统计聚合与图表（解析/输入双口径）
 - `website/` — 产品官网（纯静态零构建），push master 自动发布 GitHub Pages
+- `build.py` — 桌面版构建：前端构建 + PyInstaller 打包（--zip 产出发布 zip）
 - `.github/workflows/deploy-website.yml` — Pages 部署（build_type=workflow）
+- `.github/workflows/release.yml` — tag `v*` 触发 Windows 打包并附到 GitHub Release
 
 ## 开发与调试
 
@@ -32,6 +34,9 @@ cd frontend && npm run dev
 
 # 官网本地预览
 python -m http.server 8899 -d website
+
+# 桌面版打包（Windows）
+python build.py --zip
 ```
 
 ## 规范

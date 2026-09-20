@@ -2,7 +2,17 @@
 
 LLM API 延迟与速度检测工具。多服务商管理、跨服务商批量测速、定时测速、历史与统计可视化。
 
-**官网**：<https://john-walks-slow.github.io/token-speed/>
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+![统计视图：模型对比与速度趋势](docs/assets/stats.png)
+
+## 下载与安装（Windows 桌面版）
+
+从 [GitHub Releases](https://github.com/john-walks-slow/token-speed/releases) 下载
+`TokenSpeed-vX.X.X-win64.zip`，解压后双击 `TokenSpeed.exe` 即可（免 Python / Node 环境）。
+数据保存在 `%APPDATA%\TokenSpeed\`，托盘图标可最小化/退出，`--hidden` 参数支持开机自启。
+
+源码运行与部署方式见下文。
 
 ## 功能
 
@@ -21,19 +31,32 @@ LLM API 延迟与速度检测工具。多服务商管理、跨服务商批量测
 
 ## 启动
 
-开发模式（或直接运行根目录 `start.bat`）：
+开发模式：
 
 ```bash
-# 后端（端口 8000）
+# 1. 安装依赖
+pip install -r backend/requirements.txt
+cd frontend && npm install && cd ..
+
+# 2. 后端（端口 8000）
 python -m uvicorn backend.main:app --reload --port 8000
 
-# 前端（端口 5173，vite 代理 /api → 8000）
+# 3. 前端（端口 5173，vite 代理 /api → 8000）
 cd frontend
-npm install
 npm run dev
 ```
 
 打开 http://localhost:5173。
+
+## 打包与发布（Windows）
+
+```bash
+pip install pyinstaller
+python build.py --zip   # 构建前端 + PyInstaller 打包 + 压缩
+# 产物：dist/TokenSpeed/ 与 dist/TokenSpeed-v<版本>-win64.zip
+```
+
+打 tag（`v*`）推送后，GitHub Actions 会自动在 Windows 上打包并附到 Release。
 
 ## 管理密码（单端口只读 + 登录）
 
@@ -46,7 +69,7 @@ npm run dev
 
 **启动方式**：
 
-- **开发**：`start.bat` 起主应用（127.0.0.1:8000）。
+- **开发**：`uvicorn backend.main:app` + `npm run dev`（见「启动」），主应用 127.0.0.1:8000。
 - **服务器部署**：单个 `uvicorn backend.main:app`（主应用 127.0.0.1:8000，配置走环境变量）。
 - **桌面**：窗口自动注入 `admin_password` 直达完整界面；若手动访问，未登录显示只读视图、右上角「管理登录」。
 
@@ -70,11 +93,6 @@ autostart=true
 autorestart=true
 ```
 
-## 官网
-
-产品官网源码在 `website/`（纯静态、零构建依赖），master 分支推送后由
-GitHub Actions 自动发布到 GitHub Pages。本地预览：`python -m http.server 8899 -d website`。
-
 ## 目录结构
 
 ```
@@ -92,7 +110,6 @@ frontend/src/
   DashboardApp.tsx # 只读统计视图（未登录默认）
   components/      # 测速/结果/统计/定时/服务商管理
   lib/             # api 封装、modelLabel（provider 展示名）
-website/           # 产品官网（静态站，GitHub Pages 发布）
 ```
 
 ## 数据库
@@ -102,3 +119,7 @@ website/           # 产品官网（静态站，GitHub Pages 发布）
 ## 文档
 
 功能开发记录见 `docs/features/`（plan / validation / review / summary）。
+
+## License
+
+[MIT](LICENSE)
