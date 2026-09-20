@@ -17,6 +17,8 @@ import sys
 import uuid
 from datetime import datetime, timezone
 
+import httpx
+
 from .patrol_config import load_patrol_config
 from .speed_test import execute_batch_tests
 
@@ -27,13 +29,36 @@ DEFAULT_DATA_DIR = os.path.join(
 )
 
 
+async def discover_models(base_url: str, api_key: str, timeout: float) -> list[str]:
+    """从 {base_url}/models 拉上游全量模型 id；失败返回空列表（退回显式 models）。"""
+    url = base_url.rstrip("/") + "/models"
+    try:
+        async with httpx.AsyncClient(timeout=timeout, headers={"Authorization": f"Bearer {api_key}"}) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            return [m["id"] for m in resp.json().get("data", []) if m.get("id")]
+    except Exception as e:
+        print(f"patrol: discover {base_url} failed: {e}", file=sys.stderr)
+        return []
+
+
 async def run_patrol(config_path: str, data_dir: str = DEFAULT_DATA_DIR) -> str:
     """执行一次巡检，结果写入 data_dir 下的按天 JSONL 文件。
 
     返回写入的文件路径。
     """
     cfg = load_patrol_config(config_path)
-    tests = cfg.to_tests()
+
+    # discover=true 的 target 先拉上游全量模型列表（与显式 models 并集后过过滤规则）
+    timeout = cfg.timeout or 120.0
+    discovered: dict[str, list[str]] = {}
+    for t in cfg.targets:
+        if t.discover:
+            discovered[t.provider_name] = await discover_models(t.base_url, t.resolve_api_key(), timeout)
+            if discovered[t.provider_name]:
+                print(f"patrol: discover {t.provider_name}: {len(discovered[t.provider_name])} models", file=sys.stderr)
+
+    tests = cfg.to_tests(discovered)
 
     if not tests:
         print("patrol: no targets configured, skipping", file=sys.stderr)

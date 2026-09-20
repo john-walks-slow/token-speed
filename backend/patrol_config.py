@@ -10,6 +10,7 @@ core 层契约——本地 App（从 SQLite 组装）与 GH 巡检（从 patrol.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 
 
@@ -20,10 +21,26 @@ class PatrolTarget:
     api_key_env: str  # 环境变量名，不存明文
     protocol: str = "openai"
     models: list[str] = field(default_factory=list)
+    # 动态发现：true 时从 {base_url}/models 拉上游全量列表，与显式 models 并集
+    discover: bool = False
+    # 白/黑名单均为 regex，作用于并集：先 whitelist 匹配保留（空 = 全保留），
+    # 再 blacklist 剔除匹配项，剩下的为最终模型集
+    whitelist: list[str] = field(default_factory=list)
+    blacklist: list[str] = field(default_factory=list)
 
     def resolve_api_key(self) -> str:
         """从环境变量读取密钥；缺失返回空串（core 层会用空串发起请求，失败兜底）。"""
         return os.environ.get(self.api_key_env, "")
+
+    def filter_models(self, candidates: list[str]) -> list[str]:
+        """合并显式 models 与候选（发现列表），过 whitelist → blacklist 得最终集。"""
+        merged = list(dict.fromkeys(self.models + candidates))
+        keep = [re.compile(p) for p in self.whitelist]
+        drop = [re.compile(p) for p in self.blacklist]
+        if keep:
+            merged = [m for m in merged if any(k.fullmatch(m) for k in keep)]
+        merged = [m for m in merged if not any(b.fullmatch(m) for b in drop)]
+        return merged
 
 
 @dataclass
@@ -38,15 +55,18 @@ class PatrolConfig:
     timeout: float | None = None
     targets: list[PatrolTarget] = field(default_factory=list)
 
-    def to_tests(self) -> list[dict]:
+    def to_tests(self, discovered: dict[str, list[str]] | None = None) -> list[dict]:
         """展开为 execute_batch_tests 所需的 tests 列表（每 model 一条）。
 
+        discovered: provider_name → 动态发现的模型列表（runner 预先拉取），
+        与显式 models 并集后过 whitelist/blacklist。缺省时仅用显式 models。
         api_key 在此解析为明文，传入 core；结果 dict 不含 api_key，不落盘。
         """
+        discovered = discovered or {}
         tests: list[dict] = []
         for t in self.targets:
             api_key = t.resolve_api_key()
-            for m in t.models:
+            for m in t.filter_models(discovered.get(t.provider_name, [])):
                 tests.append({
                     "model": m,
                     "base_url": t.base_url,
@@ -75,6 +95,9 @@ def load_patrol_config(path: str) -> PatrolConfig:
             api_key_env=t["api_key_env"],
             protocol=t.get("protocol", "openai"),
             models=t.get("models", []),
+            discover=t.get("discover", False),
+            whitelist=t.get("whitelist", []),
+            blacklist=t.get("blacklist", []),
         )
         for t in raw.get("targets", [])
     ]

@@ -108,3 +108,43 @@ def test_patrol_runner_writes_jsonl(monkeypatch, tmp_path):
     assert data["results"][0]["tps"] == 20.0
     # 结果不含 api_key（脱敏验证）
     assert "api_key" not in data["results"][0]
+
+
+def test_filter_models_whitelist_blacklist():
+    """并集 → whitelist 匹配保留（空=全保留）→ blacklist 剔除，regex 全匹配。"""
+    t = PatrolTarget(
+        provider_name="P", base_url="x", api_key_env="K",
+        models=["hand-written", "z-ai/glm-5.2:free"],
+        whitelist=[r".*:free", r"hand-.*"],
+        blacklist=[r".*inkling.*"],
+    )
+    final = t.filter_models(["z-ai/glm-5.2:free", "thinkingmachines/inkling:free", "paid/model"])
+    assert "hand-written" in final
+    assert "z-ai/glm-5.2:free" in final
+    assert "thinkingmachines/inkling:free" not in final
+    assert "paid/model" not in final
+
+
+def test_filter_models_blacklist_only_and_dedup():
+    """无 whitelist 时全保留，仅 blacklist 剔除；并集去重保持顺序。"""
+    t = PatrolTarget(
+        provider_name="P", base_url="x", api_key_env="K",
+        models=["m1", "m2"],
+        blacklist=[r"m2"],
+    )
+    final = t.filter_models(["m2", "m3"])
+    assert final == ["m1", "m3"]
+
+
+def test_to_tests_with_discovered(monkeypatch):
+    """discover 结果经 filter_models 并入 tests 展开。"""
+    monkeypatch.setenv("FAKE_KEY", "sk-123")
+    cfg = PatrolConfig(
+        targets=[PatrolTarget(
+            provider_name="P1", base_url="https://api.p1.com/v1",
+            api_key_env="FAKE_KEY", models=["m1"],
+            blacklist=[r"m3"],
+        )]
+    )
+    tests = cfg.to_tests({"P1": ["m2", "m3"]})
+    assert [t["model"] for t in tests] == ["m1", "m2"]
