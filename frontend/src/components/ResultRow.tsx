@@ -34,9 +34,9 @@ export default function ResultRow({ result: r, providers }: Props) {
             <ResponseContentView content={r.response_content} />
             <span>{r.total_latency_ms}ms</span>
             <span>TTFT {r.ttft_ms !== null ? `${r.ttft_ms}ms` : "N/A"}</span>
-            {r.net_tps !== null && (
-              <span title="净 TPS = 正文 token / 扣除首字前等待（排队/思考）后的发射耗时">
-                净 {r.net_tps} tok/s
+            {r.itl_ms !== null && (
+              <span title="ITL = 首字后平均每 token 耗时（扣除排队/思考等待）">
+                ITL {r.itl_ms}ms
               </span>
             )}
             {r.reasoning_tokens > 0 && (

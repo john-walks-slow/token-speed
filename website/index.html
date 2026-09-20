@@ -218,6 +218,7 @@ footer { border-top: 1px solid var(--border); padding: 32px 0; margin-top: 20px;
         <div class="filter-group">
           <span class="filter-label">指标</span>
           <button class="chip active" data-metric="tps">有效速度</button>
+          <button class="chip" data-metric="itl_ms">ITL</button>
           <button class="chip" data-metric="ttft_ms">TTFT</button>
           <button class="chip" data-metric="total_latency_ms">延迟</button>
           <button class="chip" data-metric="success_rate">成功率</button>
@@ -248,6 +249,7 @@ footer { border-top: 1px solid var(--border); padding: 32px 0; margin-top: 20px;
 const CHART_COLORS = ['#34d399','#60a5fa','#fbbf24','#c084fc','#22d3ee','#facc15','#94a3b8','#fb7185'];
 const METRIC_LABELS = {
   tps: '有效速度 (tok/s)',
+  itl_ms: 'ITL (ms/tok)',
   ttft_ms: 'TTFT (ms)',
   total_latency_ms: '延迟 (ms)',
   success_rate: '成功率 (%)',
@@ -325,10 +327,11 @@ function runToPoints(run) {
   const byPair = {};
   for (const r of run.results) {
     const k = pairKey(r);
-    if (!byPair[k]) byPair[k] = { success: [], tps: [], ttft: [], latency: [], model: r.model, provider: r.provider_name || hostnameOf(r.base_url) };
+    if (!byPair[k]) byPair[k] = { success: [], tps: [], itl: [], ttft: [], latency: [], model: r.model, provider: r.provider_name || hostnameOf(r.base_url) };
     byPair[k].success.push(r.success);
     if (r.success) {
       if (r.tps != null) byPair[k].tps.push(r.tps);
+      if (r.itl_ms != null) byPair[k].itl.push(r.itl_ms);
       if (r.ttft_ms != null) byPair[k].ttft.push(r.ttft_ms);
       if (r.total_latency_ms != null) byPair[k].latency.push(r.total_latency_ms);
     }
@@ -337,6 +340,7 @@ function runToPoints(run) {
   for (const [k, d] of Object.entries(byPair)) {
     points[k] = {
       tps: d.tps.length ? median(d.tps) : null,
+      itl_ms: d.itl.length ? median(d.itl) : null,
       ttft_ms: d.ttft.length ? median(d.ttft) : null,
       total_latency_ms: d.latency.length ? median(d.latency) : null,
       success_rate: d.success.length ? Math.round(d.success.filter(x=>x).length / d.success.length * 1000) / 10 : 0,
@@ -371,6 +375,7 @@ function renderMetrics(latestRun) {
   const allResults = latestRun.results;
   const successResults = allResults.filter(r => r.success);
   const tpsVals = successResults.filter(r => r.tps != null).map(r => r.tps);
+  const itlVals = successResults.filter(r => r.itl_ms != null).map(r => r.itl_ms);
   const latencyVals = successResults.map(r => r.total_latency_ms);
   const ttftVals = successResults.filter(r => r.ttft_ms != null).map(r => r.ttft_ms);
   const total = allResults.length;
@@ -380,6 +385,7 @@ function renderMetrics(latestRun) {
     { label: '测试模型', value: Object.keys(points).length },
     { label: '成功率', value: `${successRate}%`, sub: `${successResults.length}/${total}` },
     { label: '中位 TPS', value: tpsVals.length ? median(tpsVals).toFixed(1) : 'N/A', sub: 'tok/s' },
+    { label: '中位 ITL', value: itlVals.length ? Math.round(median(itlVals)) + 'ms' : 'N/A', sub: 'ms/tok' },
     { label: '中位延迟', value: latencyVals.length ? Math.round(median(latencyVals)) + 'ms' : 'N/A' },
     { label: '中位 TTFT', value: ttftVals.length ? Math.round(median(ttftVals)) + 'ms' : 'N/A' },
   ];
@@ -406,6 +412,7 @@ function renderResults(latestRun) {
       ? '<span class="ok">✓</span>'
       : '<span class="fail">✗</span>';
     const tps = r.success && r.tps != null ? r.tps.toFixed(1) : '—';
+    const itl = r.success && r.itl_ms != null ? Math.round(r.itl_ms) + 'ms' : '—';
     const ttft = r.success && r.ttft_ms != null ? Math.round(r.ttft_ms) + 'ms' : '—';
     const latency = r.success ? Math.round(r.total_latency_ms) + 'ms' : '—';
     const tokens = r.success ? `${r.tokens_generated}` : '—';
@@ -416,13 +423,14 @@ function renderResults(latestRun) {
       <td>${status}</td>
       <td class="model-cell">${escapeHtml(model)}<span class="provider">${escapeHtml(provider)}</span></td>
       <td>${tps}</td>
+      <td class="hide-mobile">${itl}</td>
       <td class="hide-mobile">${ttft}</td>
       <td class="hide-mobile">${latency}</td>
       <td class="hide-mobile">${tokens} ${think}</td>
-    </tr>${err ? `<tr><td colspan="6" style="padding:0 16px 8px;border-bottom:1px solid var(--border)">${err}</td></tr>` : ''}`;
+    </tr>${err ? `<tr><td colspan="7" style="padding:0 16px 8px;border-bottom:1px solid var(--border)">${err}</td></tr>` : ''}`;
   }).join('');
   el.innerHTML = `<table class="results-table"><thead><tr>
-    <th style="width:30px"></th><th>模型</th><th>TPS</th><th class="hide-mobile">TTFT</th><th class="hide-mobile">延迟</th><th class="hide-mobile">Tokens</th>
+    <th style="width:30px"></th><th>模型</th><th>TPS</th><th class="hide-mobile">ITL</th><th class="hide-mobile">TTFT</th><th class="hide-mobile">延迟</th><th class="hide-mobile">Tokens</th>
   </tr></thead><tbody>${rows}</tbody></table>`;
 }
 

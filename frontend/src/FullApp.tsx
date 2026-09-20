@@ -192,7 +192,7 @@ export default function FullApp() {
             content_tokens: 0,
             thinking_ms: null,
             tps: null,
-            net_tps: null,
+            itl_ms: null,
             success: false,
             error_message: e instanceof Error ? e.message : "测试失败",
             created_at: new Date().toISOString(),

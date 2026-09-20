@@ -158,15 +158,16 @@ async def list_models(base_url: str, api_key: str = "", protocol: str = "openai"
         return False, str(e)
 
 
-def _compute_net_tps(content_tokens: int, content_ttft_ms: float | None, total_latency_ms: float) -> float | None:
-    """净 TPS：content_tokens / (总耗时 - content_ttft)。扣除首字前的一切等待（排队/网络/思考），
-    反映模型的纯发射速率；仅流式有 content_ttft，非流式为 None。"""
+def _compute_itl(content_tokens: int, content_ttft_ms: float | None, total_latency_ms: float) -> float | None:
+    """ITL（inter-token latency，ms/token）：(总耗时 - content_ttft) / content_tokens。
+    扣除首字前的一切等待（排队/网络/思考），反映解码阶段的纯发射耗时；
+    仅流式有 content_ttft，非流式为 None。"""
     if (
         content_ttft_ms is not None
         and content_tokens > 0
         and total_latency_ms > content_ttft_ms
     ):
-        return content_tokens / ((total_latency_ms - content_ttft_ms) / 1000)
+        return (total_latency_ms - content_ttft_ms) / content_tokens
     return None
 
 
@@ -348,8 +349,8 @@ async def run_speed_test(
         # 会把思考时间和思考 token 一起排除，得出发射速率（如 585 tok/s），偏离实际体感。
         # 主流基准（llmperf/lmsys 等）的 tokens/sec 均按全程 (tokens / e2e latency) 定义。
         tps = (tokens_generated / (total_latency_ms / 1000)) if tokens_generated > 0 else None
-        # 净 TPS：扣除首字前等待后的纯发射速率（见 _compute_net_tps）
-        net_tps = _compute_net_tps(content_tokens, content_ttft_ms, total_latency_ms)
+        # ITL：扣除首字前等待后的解码耗时（见 _compute_itl）
+        itl_ms = _compute_itl(content_tokens, content_ttft_ms, total_latency_ms)
         # 思考耗时仅在流中出现过 reasoning 增量时才可测（ttft=首个 reasoning token，
         # content_ttft=首个正文 token）；否则网关只转正文，思考时间已混入 TTFT
         if content_ttft_ms is not None and ttft_ms is not None and reasoning_seen:
@@ -377,7 +378,7 @@ async def run_speed_test(
             "input_tokens": input_tokens,
             "thinking_ms": round(thinking_ms, 2) if thinking_ms is not None else None,
             "tps": round(tps, 2) if tps is not None else None,
-            "net_tps": round(net_tps, 2) if net_tps is not None else None,
+            "itl_ms": round(itl_ms, 2) if itl_ms is not None else None,
             "success": True,
             "error_message": None,
             "created_at": created_at,
@@ -405,7 +406,7 @@ async def run_speed_test(
             "input_tokens": 0,
             "thinking_ms": None,
             "tps": None,
-            "net_tps": None,
+            "itl_ms": None,
             "success": False,
             "error_message": str(e),
             "created_at": created_at,
@@ -511,7 +512,7 @@ def _batch_error_result(exc: BaseException, item: dict, prompt: str, max_tokens:
         "tokens_generated": 0,
         "thinking_ms": None,
         "tps": None,
-        "net_tps": None,
+        "itl_ms": None,
         "success": False,
         "error_message": str(exc),
         "created_at": datetime.now(timezone.utc).isoformat(),
