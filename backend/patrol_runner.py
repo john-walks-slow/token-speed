@@ -62,7 +62,8 @@ async def run_patrol(config_path: str, data_dir: str = DEFAULT_DATA_DIR) -> str:
         if t.discover:
             discovered[t.provider_name] = await discover_models(t.base_url, t.resolve_api_key(), timeout, t.discover_url)
             if discovered[t.provider_name]:
-                print(f"patrol: discover {t.provider_name}: {len(discovered[t.provider_name])} models", file=sys.stderr)
+                after = len(t.filter_models(discovered[t.provider_name]))
+                print(f"patrol: discover {t.provider_name}: {len(discovered[t.provider_name])} models, {after} after filter", file=sys.stderr)
 
     tests = cfg.to_tests(discovered)
 
