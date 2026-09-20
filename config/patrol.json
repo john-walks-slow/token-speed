@@ -26,7 +26,7 @@
       "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
       "api_key_env": "GEMINI_API_KEY",
       "protocol": "openai",
-      "models": ["gemini-2.5-flash"]
+      "models": ["gemini-3.5-flash"]
     },
     {
       "provider_name": "SambaNova",
