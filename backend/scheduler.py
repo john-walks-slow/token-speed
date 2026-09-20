@@ -6,6 +6,7 @@ from .database import (
     get_due_schedules,
     get_provider,
     get_schedule,
+    insert_speed_test,
     mark_schedule_stale_running,
     reset_schedule_run_progress,
     update_schedule_progress,
@@ -125,6 +126,9 @@ class SpeedTestScheduler:
                     schedule_id, bool(result.get("success"))
                 )
 
+            async def sqlite_sink(result: dict) -> None:
+                await insert_speed_test(result, schedule_id)
+
             results = await execute_batch_tests(
                 tests,
                 prompt=sched["prompt"] or "",
@@ -136,6 +140,7 @@ class SpeedTestScheduler:
                 schedule_id=schedule_id,
                 max_rpm=sched["max_rpm"] if sched["max_rpm"] is not None else -1,
                 on_progress=on_progress,
+                sink=sqlite_sink,
             )
             ok = sum(1 for r in results if r["success"])
             if ok == len(results):

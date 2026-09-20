@@ -216,12 +216,15 @@ def compute_summary(parsed: list[SpeedTestResult]) -> BatchSummary:
     )
 
 
-async def _iter_batch_results(req: BatchSpeedTestRequest):
+async def _iter_batch_results(req: BatchSpeedTestRequest, sink=None):
     """Run all tests, yielding each result as it completes.
 
     并发按 provider(base_url+api_key) 分桶，每桶独立 Semaphore(req.concurrency)，
     不同 provider 互不挤占。异常按 item 兜底为 error result。SSE 客户端提前断开时
     取消剩余任务。
+
+    sink：可选的逐条落地回调（每条结果完成后调用），由调用方注入数据去向。
+    core 层不感知数据存储方式。
     """
     now_iso = datetime.now(timezone.utc).isoformat()
     items = _expand_tests(req)
@@ -236,7 +239,7 @@ async def _iter_batch_results(req: BatchSpeedTestRequest):
         await limiter.acquire(key, req.max_rpm)
         async with sem:
             try:
-                return await run_speed_test(
+                r = await run_speed_test(
                     base_url=item.base_url,
                     api_key=item.api_key,
                     model=item.model,
@@ -249,7 +252,10 @@ async def _iter_batch_results(req: BatchSpeedTestRequest):
                     protocol=item.protocol,
                 )
             except Exception as e:
-                return _to_error_result(item, req, e, now_iso)
+                r = _to_error_result(item, req, e, now_iso)
+            if sink is not None:
+                await sink(r)
+            return r
 
     tasks = [asyncio.create_task(run_one(item)) for item in items]
     try:
@@ -265,11 +271,10 @@ async def _iter_batch_results(req: BatchSpeedTestRequest):
 
 @admin_router.post("/api/speed-test/batch", response_model=BatchSpeedTestResponse)
 async def batch_speed_test(req: BatchSpeedTestRequest):
-    results = [r async for r in _iter_batch_results(req)]
-
-    # Save all results
-    for r in results:
+    async def sqlite_sink(r: dict) -> None:
         await insert_speed_test(r)
+
+    results = [r async for r in _iter_batch_results(req, sqlite_sink)]
 
     parsed = [SpeedTestResult(**r) for r in results]
     return BatchSpeedTestResponse(results=parsed, summary=compute_summary(parsed))
@@ -283,11 +288,13 @@ def _sse(event: str, data: dict) -> str:
 async def batch_speed_test_stream(req: BatchSpeedTestRequest):
     total = len(req.tests) * req.iterations
 
+    async def sqlite_sink(r: dict) -> None:
+        await insert_speed_test(r)
+
     async def event_stream():
         results = []
-        async for result in _iter_batch_results(req):
+        async for result in _iter_batch_results(req, sqlite_sink):
             results.append(result)
-            await insert_speed_test(result)
             yield _sse("progress", {"index": len(results), "total": total, "result": result})
 
         parsed = [SpeedTestResult(**r) for r in results]

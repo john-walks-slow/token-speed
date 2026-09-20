@@ -1,0 +1,32 @@
+{
+  "prompt": "Hello, tell me a short story in 3 sentences.",
+  "max_tokens": 256,
+  "temperature": null,
+  "stream": true,
+  "concurrency": 1,
+  "iterations": 1,
+  "max_rpm": -1,
+  "targets": [
+    {
+      "provider_name": "OpenAI",
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": "OPENAI_API_KEY",
+      "protocol": "openai",
+      "models": ["gpt-4o-mini"]
+    },
+    {
+      "provider_name": "DeepSeek",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key_env": "DEEPSEEK_API_KEY",
+      "protocol": "openai",
+      "models": ["deepseek-chat"]
+    },
+    {
+      "provider_name": "Anthropic",
+      "base_url": "https://api.anthropic.com/v1",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "protocol": "anthropic",
+      "models": ["claude-haiku-4-5-20251001"]
+    }
+  ]
+}

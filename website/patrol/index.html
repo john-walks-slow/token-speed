@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Token Speed Patrol — LLM API 巡检看板</title>
+<meta name="description" content="Token Speed 巡检看板：GitHub Actions 定时测速，TTFT / TPS / 成功率趋势可视化。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23059669'/%3E%3Cpath d='M6 16h4l3-7 4 14 3-7h6' fill='none' stroke='%2334d399' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #0a0d10;
+  --bg-soft: #0e1216;
+  --card: rgba(255, 255, 255, 0.03);
+  --card-hover: rgba(255, 255, 255, 0.055);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text: #e7edf2;
+  --text-dim: #9aa7b2;
+  --text-faint: #5f6b76;
+  --green: #34d399;
+  --green-soft: rgba(52, 211, 153, 0.12);
+  --amber: #fbbf24;
+  --red: #f87171;
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --chart-1: #34d399;
+  --chart-2: #60a5fa;
+  --chart-3: #fbbf24;
+  --chart-4: #c084fc;
+  --chart-5: #22d3ee;
+  --chart-6: #facc15;
+  --chart-7: #94a3b8;
+  --chart-8: #fb7185;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+::selection { background: rgba(52, 211, 153, 0.25); }
+a { color: inherit; text-decoration: none; }
+
+.bg-grid {
+  position: fixed; inset: 0; z-index: -2;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, black 40%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, black 40%, transparent 100%);
+}
+.glow {
+  position: fixed; z-index: -1; border-radius: 50%; filter: blur(110px); pointer-events: none;
+}
+.glow-a { width: 560px; height: 380px; top: -140px; left: 50%; transform: translateX(-50%); background: rgba(16, 185, 129, 0.1); }
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
+
+/* nav */
+nav {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(10, 13, 16, 0.75);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+}
+.nav-inner { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; }
+.brand-logo {
+  width: 28px; height: 28px; border-radius: 8px; background: var(--green-soft);
+  display: grid; place-items: center; flex-shrink: 0;
+}
+.brand-logo svg { width: 16px; height: 16px; }
+.nav-links { display: flex; align-items: center; gap: 20px; font-size: 13px; color: var(--text-dim); }
+.nav-links a:hover { color: var(--text); }
+.nav-status { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-dim); }
+.nav-status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+.nav-status .dot.warn { background: var(--amber); }
+.nav-status .dot.err { background: var(--red); }
+
+/* hero */
+header { padding: 48px 0 32px; }
+h1 { font-size: clamp(28px, 4vw, 42px); font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 14px; }
+h1 .grad { background: linear-gradient(120deg, #34d399 20%, #6ee7b7 45%, #a7f3d0 90%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hero-sub { font-size: 15.5px; color: var(--text-dim); max-width: 640px; }
+.hero-sub strong { color: var(--text); font-weight: 600; }
+.last-run { margin-top: 10px; font-size: 12px; color: var(--text-faint); font-family: var(--mono); }
+
+/* metric cards */
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 36px; }
+.metric-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+  padding: 22px 20px; transition: all .2s;
+}
+.metric-card:hover { background: var(--card-hover); border-color: var(--border-strong); }
+.metric-card .label { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+.metric-card .value { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.metric-card .sub { font-size: 11px; color: var(--text-dim); margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+/* section */
+section { margin-bottom: 40px; }
+.sec-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; flex-wrap: wrap; gap: 12px; }
+.sec-title { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.sec-kicker { font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; color: var(--green); text-transform: uppercase; }
+
+/* filters */
+.filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.filter-group { display: flex; align-items: center; gap: 6px; }
+.filter-label { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; }
+.chip {
+  font-size: 12px; font-weight: 500; border-radius: 999px; padding: 5px 13px;
+  border: 1px solid var(--border); background: var(--card); color: var(--text-dim);
+  cursor: pointer; transition: all .15s; font-family: var(--sans); white-space: nowrap;
+}
+.chip:hover { color: var(--text); border-color: var(--border-strong); }
+.chip.active { background: var(--green-soft); border-color: rgba(52,211,153,.4); color: var(--green); }
+
+/* results table */
+.results-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+  overflow: hidden;
+}
+.results-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.results-table th {
+  text-align: left; padding: 12px 16px; font-size: 11px; font-weight: 600;
+  color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02);
+}
+.results-table td { padding: 11px 16px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.results-table tr:last-child td { border-bottom: none; }
+.results-table tr:hover { background: var(--card-hover); }
+.results-table .model-cell { font-weight: 600; }
+.results-table .model-cell .provider { font-weight: 400; font-size: 11px; color: var(--text-dim); display: block; margin-top: 1px; }
+.results-table .ok { color: var(--green); }
+.results-table .fail { color: var(--red); }
+.results-table .err-msg { font-size: 11px; color: var(--text-faint); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* chart */
+.chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+.chart-card canvas { display: block; width: 100%; }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
+.legend-item .swatch { width: 12px; height: 3px; border-radius: 2px; }
+.legend-item.disabled { opacity: 0.4; }
+.legend-item.disabled .swatch { background: var(--text-faint) !important; }
+
+/* empty / loading */
+.empty, .loading { text-align: center; padding: 60px 0; color: var(--text-faint); font-size: 14px; }
+.loading .spinner { width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--green); border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 12px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* footer */
+footer { border-top: 1px solid var(--border); padding: 32px 0; margin-top: 20px; }
+.foot-inner { display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-faint); }
+.foot-links { display: flex; gap: 18px; }
+.foot-links a:hover { color: var(--green); }
+
+@media (max-width: 640px) {
+  .results-table { font-size: 12px; }
+  .results-table th, .results-table td { padding: 8px 10px; }
+  .results-table .hide-mobile { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="bg-grid"></div>
+<div class="glow glow-a"></div>
+
+<nav>
+  <div class="wrap nav-inner">
+    <a class="brand" href="..">
+      <span class="brand-logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+      </span>
+      Token Speed Patrol
+    </a>
+    <div class="nav-links">
+      <span class="nav-status" id="navStatus"><span class="dot"></span><span>加载中…</span></span>
+      <a href="https://github.com/john-walks-slow/token-speed" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header>
+  <div class="wrap">
+    <h1>LLM API <span class="grad">巡检看板</span></h1>
+    <p class="hero-sub">
+      <strong>GitHub Actions</strong> 每 6 小时自动测速一次，TTFT / TPS / 成功率长期趋势。
+      测速口径与 <a href=".." style="color:var(--green)">桌面版</a> 完全一致——同一测速内核，中立数据中心视角。
+    </p>
+    <p class="last-run" id="lastRun">—</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- Aggregate metrics -->
+  <div class="metrics" id="metrics"></div>
+
+  <!-- Latest run results -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-title"><span class="sec-kicker">/ Latest</span> 最近一次巡检</div>
+    </div>
+    <div class="results-card" id="resultsCard">
+      <div class="loading"><div class="spinner"></div>加载中…</div>
+    </div>
+  </section>
+
+  <!-- Trend chart -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-title"><span class="sec-kicker">/ Trend</span> 趋势</div>
+      <div class="filters">
+        <div class="filter-group">
+          <span class="filter-label">指标</span>
+          <button class="chip active" data-metric="tps">有效速度</button>
+          <button class="chip" data-metric="ttft_ms">TTFT</button>
+          <button class="chip" data-metric="total_latency_ms">延迟</button>
+          <button class="chip" data-metric="success_rate">成功率</button>
+        </div>
+      </div>
+    </div>
+    <div class="chart-card">
+      <canvas id="trendChart" height="320"></canvas>
+      <div class="legend" id="legend"></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot-inner">
+    <div>Token Speed Patrol · GitHub Actions 定时巡检 · 数据公开可追溯</div>
+    <div class="foot-links">
+      <a href="https://github.com/john-walks-slow/token-speed" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/john-walks-slow/token-speed/actions" target="_blank" rel="noopener">Actions</a>
+      <a href="..">桌面版</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+// ── 数据加载 ──────────────────────────────────────
+
+const CHART_COLORS = ['#34d399','#60a5fa','#fbbf24','#c084fc','#22d3ee','#facc15','#94a3b8','#fb7185'];
+const METRIC_LABELS = {
+  tps: '有效速度 (tok/s)',
+  ttft_ms: 'TTFT (ms)',
+  total_latency_ms: '延迟 (ms)',
+  success_rate: '成功率 (%)',
+};
+
+let allRuns = [];      // 按时间升序的 run 记录
+let activeMetric = 'tps';
+let activeKeys = new Set(); // 选中的 (provider|model) 对
+
+// 尝试加载 data/ 下所有 JSONL 文件
+async function loadAllData() {
+  // 获取文件列表：GitHub Pages 静态站无目录列举，用 git API 或固定文件名
+  // 巡检每天一个文件，取最近 90 天
+  const files = await discoverJsonlFiles();
+  const all = [];
+  for (const f of files) {
+    try {
+      const resp = await fetch(f + '?t=' + Date.now());
+      if (!resp.ok) continue;
+      const text = await resp.text();
+      for (const line of text.trim().split('\n')) {
+        if (!line) continue;
+        all.push(JSON.parse(line));
+      }
+    } catch (e) { /* 文件可能不存在，跳过 */ }
+  }
+  all.sort((a, b) => a.started_at.localeCompare(b.started_at));
+  return all;
+}
+
+// 探测可用的 JSONL 文件：尝试最近 N 天 + 今天
+async function discoverJsonlFiles() {
+  const days = 90;
+  const files = [];
+  const now = new Date();
+  for (let i = 0; i <= days; i++) {
+    const d = new Date(now.getTime() - i * 86400000);
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    files.push(`data/${y}-${m}-${day}.jsonl`);
+  }
+  // 探测哪些存在（HEAD 请求）；fetch 不支持 HEAD 的跨域限制少，Pages 同源没问题
+  const existing = [];
+  await Promise.all(files.map(async f => {
+    try {
+      const resp = await fetch(f, { method: 'HEAD' });
+      if (resp.ok) existing.push(f);
+    } catch {}
+  }));
+  return existing;
+}
+
+// ── 数据处理（与 StatsPanel 逻辑对齐）──────────────
+
+function pairKey(r) {
+  const p = r.provider_name || hostnameOf(r.base_url) || 'unknown';
+  return `${p}|${r.model}`;
+}
+
+function hostnameOf(url) {
+  if (!url) return 'unknown';
+  try { return new URL(url).hostname || 'unknown'; } catch { return url; }
+}
+
+function median(nums) {
+  if (!nums.length) return 0;
+  const s = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+// 从一条 run 提取每个 (provider|model) 对的聚合值
+function runToPoints(run) {
+  const byPair = {};
+  for (const r of run.results) {
+    const k = pairKey(r);
+    if (!byPair[k]) byPair[k] = { success: [], tps: [], ttft: [], latency: [], model: r.model, provider: r.provider_name || hostnameOf(r.base_url) };
+    byPair[k].success.push(r.success);
+    if (r.success) {
+      if (r.tps != null) byPair[k].tps.push(r.tps);
+      if (r.ttft_ms != null) byPair[k].ttft.push(r.ttft_ms);
+      if (r.total_latency_ms != null) byPair[k].latency.push(r.total_latency_ms);
+    }
+  }
+  const points = {};
+  for (const [k, d] of Object.entries(byPair)) {
+    points[k] = {
+      tps: d.tps.length ? median(d.tps) : null,
+      ttft_ms: d.ttft.length ? median(d.ttft) : null,
+      total_latency_ms: d.latency.length ? median(d.latency) : null,
+      success_rate: d.success.length ? Math.round(d.success.filter(x=>x).length / d.success.length * 1000) / 10 : 0,
+      count: d.success.length,
+      model: d.model,
+      provider: d.provider,
+    };
+  }
+  return points;
+}
+
+// ── 渲染 ──────────────────────────────────────────
+
+function renderNavStatus(latestRun) {
+  const el = document.getElementById('navStatus');
+  if (!latestRun) { el.innerHTML = '<span class="dot err"></span><span>暂无数据</span>'; return; }
+  const dot = latestRun.status === 'success' ? '' : latestRun.status === 'partial' ? 'warn' : 'err';
+  el.innerHTML = `<span class="dot ${dot}"></span><span>${latestRun.status === 'success' ? '全部正常' : latestRun.status === 'partial' ? '部分失败' : '巡检失败'}</span>`;
+}
+
+function renderLastRun(latestRun) {
+  const el = document.getElementById('lastRun');
+  if (!latestRun) { el.textContent = '—'; return; }
+  const d = new Date(latestRun.finished_at || latestRun.started_at);
+  el.textContent = `上次巡检：${d.toLocaleString()} · ${latestRun.success}/${latestRun.total} 成功`;
+}
+
+function renderMetrics(latestRun) {
+  const el = document.getElementById('metrics');
+  if (!latestRun) { el.innerHTML = ''; return; }
+  const points = runToPoints(latestRun);
+  const allResults = latestRun.results;
+  const successResults = allResults.filter(r => r.success);
+  const tpsVals = successResults.filter(r => r.tps != null).map(r => r.tps);
+  const latencyVals = successResults.map(r => r.total_latency_ms);
+  const ttftVals = successResults.filter(r => r.ttft_ms != null).map(r => r.ttft_ms);
+  const total = allResults.length;
+  const successRate = total ? Math.round(successResults.length / total * 100) : 0;
+
+  const cards = [
+    { label: '测试模型', value: Object.keys(points).length },
+    { label: '成功率', value: `${successRate}%`, sub: `${successResults.length}/${total}` },
+    { label: '中位 TPS', value: tpsVals.length ? median(tpsVals).toFixed(1) : 'N/A', sub: 'tok/s' },
+    { label: '中位延迟', value: latencyVals.length ? Math.round(median(latencyVals)) + 'ms' : 'N/A' },
+    { label: '中位 TTFT', value: ttftVals.length ? Math.round(median(ttftVals)) + 'ms' : 'N/A' },
+  ];
+  el.innerHTML = cards.map(c =>
+    `<div class="metric-card"><div class="label">${c.label}</div><div class="value">${c.value}</div>${c.sub ? `<div class="sub">${c.sub}</div>` : ''}</div>`
+  ).join('');
+}
+
+function renderResults(latestRun) {
+  const el = document.getElementById('resultsCard');
+  if (!latestRun || !latestRun.results.length) {
+    el.innerHTML = '<div class="empty">暂无巡检数据</div>'; return;
+  }
+  // 按 tps 降序，失败排最后
+  const sorted = [...latestRun.results].sort((a, b) => {
+    if (a.success !== b.success) return b.success - a.success;
+    return (b.tps || 0) - (a.tps || 0);
+  });
+  const rows = sorted.map(r => {
+    const model = r.actual_model && r.actual_model !== 'error' && r.actual_model !== r.model
+      ? `${r.model}（${r.actual_model}）` : r.model;
+    const provider = r.provider_name || hostnameOf(r.base_url);
+    const status = r.success
+      ? '<span class="ok">✓</span>'
+      : '<span class="fail">✗</span>';
+    const tps = r.success && r.tps != null ? r.tps.toFixed(1) : '—';
+    const ttft = r.success && r.ttft_ms != null ? Math.round(r.ttft_ms) + 'ms' : '—';
+    const latency = r.success ? Math.round(r.total_latency_ms) + 'ms' : '—';
+    const tokens = r.success ? `${r.tokens_generated}` : '—';
+    const think = r.success && r.reasoning_tokens > 0
+      ? `<span style="color:#c084fc">${r.reasoning_tokens}+${r.content_tokens}</span>` : '';
+    const err = !r.success ? `<div class="err-msg" title="${escapeHtml(r.error_message || '')}">${escapeHtml(r.error_message || '')}</div>` : '';
+    return `<tr>
+      <td>${status}</td>
+      <td class="model-cell">${escapeHtml(model)}<span class="provider">${escapeHtml(provider)}</span></td>
+      <td>${tps}</td>
+      <td class="hide-mobile">${ttft}</td>
+      <td class="hide-mobile">${latency}</td>
+      <td class="hide-mobile">${tokens} ${think}</td>
+    </tr>${err ? `<tr><td colspan="6" style="padding:0 16px 8px;border-bottom:1px solid var(--border)">${err}</td></tr>` : ''}`;
+  }).join('');
+  el.innerHTML = `<table class="results-table"><thead><tr>
+    <th style="width:30px"></th><th>模型</th><th>TPS</th><th class="hide-mobile">TTFT</th><th class="hide-mobile">延迟</th><th class="hide-mobile">Tokens</th>
+  </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function escapeHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ── 趋势图（原生 Canvas，无依赖）──────────────────
+
+let chartCanvas, chartCtx;
+
+function initChart() {
+  chartCanvas = document.getElementById('trendChart');
+  chartCtx = chartCanvas.getContext('2d');
+  resizeChart();
+  window.addEventListener('resize', resizeChart);
+}
+
+function resizeChart() {
+  if (!chartCanvas) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = chartCanvas.parentElement.clientWidth - 40;
+  chartCanvas.width = w * dpr;
+  chartCanvas.height = 320 * dpr;
+  chartCanvas.style.width = w + 'px';
+  chartCanvas.style.height = '320px';
+  chartCtx.scale(dpr, dpr);
+  drawChart();
+}
+
+function drawChart() {
+  if (!chartCtx || !allRuns.length) return;
+  const ctx = chartCtx;
+  const w = chartCanvas.width / (window.devicePixelRatio || 1);
+  const h = 320;
+  ctx.clearRect(0, 0, w, h);
+
+  // 收集所有出现过的 pair
+  const allPairs = new Set();
+  const seriesByPair = {}; // pair -> [{time, value}]
+  for (const run of allRuns) {
+    const points = runToPoints(run);
+    const t = new Date(run.started_at).getTime();
+    for (const [k, p] of Object.entries(points)) {
+      allPairs.add(k);
+      const v = p[activeMetric];
+      if (v == null) continue;
+      if (!seriesByPair[k]) seriesByPair[k] = [];
+      seriesByPair[k].push({ time: t, value: v });
+    }
+  }
+
+  const pairs = [...allPairs].sort();
+  // 默认全选
+  if (activeKeys.size === 0) pairs.forEach(k => activeKeys.add(k));
+
+  const visibleSeries = pairs.filter(k => activeKeys.has(k) && seriesByPair[k]);
+  if (!visibleSeries.length) {
+    ctx.fillStyle = '#5f6b76'; ctx.font = '14px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('当前筛选下无数据', w / 2, h / 2);
+    renderLegend(pairs, seriesByPair);
+    return;
+  }
+
+  // 时间范围
+  const times = visibleSeries.flatMap(s => seriesByPair[s].map(d => d.time));
+  const tMin = Math.min(...times), tMax = Math.max(...times);
+  // 值范围
+  const vals = visibleSeries.flatMap(s => seriesByPair[s].map(d => d.value));
+  let vMin = Math.min(...vals), vMax = Math.max(...vals);
+  if (activeMetric === 'success_rate') { vMin = 0; vMax = 100; }
+  else { vMin = vMin > 0 ? vMin * 0.9 : 0; vMax = vMax * 1.1; }
+  if (vMax === vMin) vMax = vMin + 1;
+
+  // 绘图区域
+  const pad = { l: 50, r: 16, t: 16, b: 36 };
+  const cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+
+  // 网格 + Y 轴
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1; ctx.fillStyle = '#5f6b76'; ctx.font = '11px sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.t + ch * i / 4;
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + cw, y); ctx.stroke();
+    const val = vMax - (vMax - vMin) * i / 4;
+    ctx.fillText(formatVal(val), pad.l - 8, y);
+  }
+
+  // X 轴时间标签
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  const xTicks = Math.min(6, allRuns.length);
+  for (let i = 0; i <= xTicks; i++) {
+    const t = tMin + (tMax - tMin) * i / xTicks;
+    const x = pad.l + cw * i / xTicks;
+    ctx.fillText(formatTime(t), x, pad.t + ch + 8);
+  }
+
+  // 折线
+  visibleSeries.forEach((k, idx) => {
+    const data = seriesByPair[k];
+    const color = CHART_COLORS[pairs.indexOf(k) % CHART_COLORS.length];
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    data.forEach((d, i) => {
+      const x = pad.l + ((d.time - tMin) / (tMax - tMin || 1)) * cw;
+      const y = pad.t + (1 - (d.value - vMin) / (vMax - vMin || 1)) * ch;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    // 数据点
+    ctx.stroke();
+    ctx.fillStyle = color;
+    data.forEach(d => {
+      const x = pad.l + ((d.time - tMin) / (tMax - tMin || 1)) * cw;
+      const y = pad.t + (1 - (d.value - vMin) / (vMax - vMin || 1)) * ch;
+      ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
+    });
+  });
+
+  renderLegend(pairs, seriesByPair);
+}
+
+function formatVal(v) {
+  if (activeMetric === 'success_rate') return v.toFixed(0) + '%';
+  if (activeMetric === 'tps') return v.toFixed(0);
+  return Math.round(v);
+}
+
+function formatTime(t) {
+  const d = new Date(t);
+  const span = allRuns.length > 1
+    ? new Date(allRuns[allRuns.length-1].started_at).getTime() - new Date(allRuns[0].started_at).getTime()
+    : 0;
+  if (span > 7 * 86400000) return `${d.getMonth()+1}/${d.getDate()}`;
+  return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+function renderLegend(pairs, seriesByPair) {
+  const el = document.getElementById('legend');
+  el.innerHTML = pairs.map((k, i) => {
+    const color = CHART_COLORS[i % CHART_COLORS.length];
+    const active = activeKeys.has(k);
+    const has = !!seriesByPair[k];
+    if (!has) return '';
+    const [provider, model] = k.split('|');
+    return `<div class="legend-item${active ? '' : ' disabled'}" data-key="${escapeHtml(k)}">
+      <span class="swatch" style="background:${color}"></span>
+      <span>${escapeHtml(model)} <span style="color:var(--text-faint)">${escapeHtml(provider)}</span></span>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.legend-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const k = item.dataset.key;
+      if (activeKeys.has(k)) activeKeys.delete(k); else activeKeys.add(k);
+      drawChart();
+    });
+  });
+}
+
+// ── 交互 ──────────────────────────────────────────
+
+document.querySelectorAll('[data-metric]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-metric]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeMetric = btn.dataset.metric;
+    activeKeys.clear(); // 切换指标重置选中
+    drawChart();
+  });
+});
+
+// ── 启动 ──────────────────────────────────────────
+
+async function init() {
+  initChart();
+  allRuns = await loadAllData();
+  if (!allRuns.length) {
+    document.getElementById('resultsCard').innerHTML = '<div class="empty">暂无巡检数据。<br> Fork 仓库并启用 Patrol workflow 后，数据会在此自动展示。</div>';
+    renderNavStatus(null);
+    return;
+  }
+  const latest = allRuns[allRuns.length - 1];
+  renderNavStatus(latest);
+  renderLastRun(latest);
+  renderMetrics(latest);
+  renderResults(latest);
+  drawChart();
+}
+
+init();
+</script>
+</body>
+</html>

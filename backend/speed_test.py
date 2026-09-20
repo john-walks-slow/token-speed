@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 
 import httpx
 
-from .database import insert_speed_test
 from .rate_limit import limiter
 from .network_settings import client_kwargs as net_client_kwargs
 from .url_utils import normalize_base_url
@@ -406,13 +405,17 @@ async def execute_batch_tests(
     schedule_id: str | None = None,
     max_rpm: int = -1,
     on_progress: Callable[[dict], Awaitable[None]] | None = None,
+    sink: Callable[[dict], Awaitable[None]] | None = None,
 ) -> list[dict]:
-    """批量执行测速并入库。batch 端点与定时调度器共用。
+    """批量执行测速。batch 端点与定时调度器、巡检 runner 共用。
 
     并发按 provider(base_url+api_key) 分桶：每个 provider 独占一个 Semaphore(concurrency)，
     不同 provider 互不挤占。桶内按模型 round-robin 交错展开（每轮迭代依次取各 model），
     使同 provider 各模型在相同并发密度下被测。返回每个测试的结果 dict（异常以失败结果兜底）。
-    schedule_id 非空时标记到历史。
+
+    数据落地由调用方通过 sink callback 注入（逐条消费，每条完成后调用）。
+    core 层不感知数据去向（SQLite / JSON / ...），这是两种部署形态正交的支点。
+    不传 sink 时不在本函数内落地（仅返回 results）。
     """
     # 按 provider 分桶，桶内保留原始 model 顺序
     buckets: dict[tuple[str, str], list[dict]] = {}
@@ -459,8 +462,9 @@ async def execute_batch_tests(
     results = await asyncio.gather(*[run_one_progress(it) for it in all_items], return_exceptions=True)
     results = [r if not isinstance(r, Exception) else _batch_error_result(r, it, prompt, max_tokens, temperature) for r, it in zip(results, all_items)]
 
-    for r in results:
-        await insert_speed_test(r, schedule_id)
+    if sink is not None:
+        for r in results:
+            await sink(r)
 
     return results
 

@@ -1,0 +1,96 @@
+"""巡检 runner：GH Actions 定时巡检入口（PATROL adapter）。
+
+`python -m backend.patrol_runner` —— 不依赖 FastAPI 事件循环，
+读 config/patrol.json → 组装 tests → execute_batch_tests(sink=json_sink)
+→ 写 JSON 到 website/patrol/data/。
+
+数据落地由 json_sink 注入（逐条收集，结束后一次性写文件）。core 层
+（speed_test.py）不感知数据去向，与本地 App 共用同一测速内核。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import sys
+import uuid
+from datetime import datetime, timezone
+
+from .patrol_config import load_patrol_config
+from .speed_test import execute_batch_tests
+
+# 巡检结果目录：放 website/patrol/data/ 下，随 Pages 一起发布
+DEFAULT_DATA_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "website", "patrol", "data",
+)
+
+
+async def run_patrol(config_path: str, data_dir: str = DEFAULT_DATA_DIR) -> str:
+    """执行一次巡检，结果写入 data_dir 下的按天 JSONL 文件。
+
+    返回写入的文件路径。
+    """
+    cfg = load_patrol_config(config_path)
+    tests = cfg.to_tests()
+
+    if not tests:
+        print("patrol: no targets configured, skipping", file=sys.stderr)
+        return ""
+
+    run_id = str(uuid.uuid4())
+    run_started = datetime.now(timezone.utc).isoformat()
+    collected: list[dict] = []
+
+    async def json_sink(result: dict) -> None:
+        collected.append(result)
+
+    results = await execute_batch_tests(
+        tests,
+        prompt=cfg.prompt,
+        max_tokens=cfg.max_tokens,
+        temperature=cfg.temperature,
+        stream=cfg.stream,
+        concurrency=cfg.concurrency,
+        iterations=cfg.iterations,
+        max_rpm=cfg.max_rpm,
+        sink=json_sink,
+    )
+
+    run_finished = datetime.now(timezone.utc).isoformat()
+    ok = sum(1 for r in results if r.get("success"))
+    status = "success" if ok == len(results) else ("partial" if ok > 0 else "failed")
+
+    # 按天分文件：website/patrol/data/YYYY-MM-DD.jsonl
+    # 每行一个 run 的完整结果数组，便于静态看板按天加载
+    os.makedirs(data_dir, exist_ok=True)
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    out_path = os.path.join(data_dir, f"{day}.jsonl")
+
+    run_record = {
+        "run_id": run_id,
+        "started_at": run_started,
+        "finished_at": run_finished,
+        "status": status,
+        "total": len(results),
+        "success": ok,
+        "failed": len(results) - ok,
+        "results": results,
+    }
+
+    with open(out_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(run_record, ensure_ascii=False) + "\n")
+
+    print(f"patrol: {ok}/{len(results)} success → {out_path}", file=sys.stderr)
+    return out_path
+
+
+def main() -> None:
+    config_path = os.environ.get("PATROL_CONFIG", "config/patrol.json")
+    data_dir = os.environ.get("PATROL_DATA_DIR", DEFAULT_DATA_DIR)
+    asyncio.run(run_patrol(config_path, data_dir))
+
+
+if __name__ == "__main__":
+    main()

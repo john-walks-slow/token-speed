@@ -120,15 +120,26 @@ def test_run_schedule_success_updates_status_and_advances(db, monkeypatch):
 
     async def fake_execute(tests, prompt, max_tokens, temperature, stream,
                            concurrency, iterations, schedule_id=None,
-                           max_rpm=-1, on_progress=None):
+                           max_rpm=-1, on_progress=None, sink=None):
         captured["tests"] = tests
         captured["schedule_id"] = schedule_id
         captured["prompt"] = prompt
         captured["max_rpm"] = max_rpm
+        results = [
+            {"id": "r1", "success": True, "model": "m1", "base_url": "http://x", "prompt": prompt,
+             "max_tokens": max_tokens, "temperature": temperature, "tokens_generated": 1,
+             "total_latency_ms": 10, "actual_model": "m1"},
+            {"id": "r2", "success": True, "model": "m2", "base_url": "http://x", "prompt": prompt,
+             "max_tokens": max_tokens, "temperature": temperature, "tokens_generated": 1,
+             "total_latency_ms": 10, "actual_model": "m2"},
+        ]
         # 模拟逐个完成，触发进度回调
-        for r in [{"success": True}, {"success": True}]:
+        for r in results:
             await on_progress(r)
-        return [{"success": True}, {"success": True}]
+        if sink is not None:
+            for r in results:
+                await sink(r)
+        return results
 
     monkeypatch.setattr("backend.scheduler.execute_batch_tests", fake_execute)
 
