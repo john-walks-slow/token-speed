@@ -20,6 +20,8 @@ APP_NAME = "TokenSpeed"
 
 
 def run(cmd: list[str], cwd: pathlib.Path) -> None:
+    # Windows 下 npm 等是 .cmd，需 which 解析全路径否则 CreateProcess 找不到
+    cmd[0] = shutil.which(cmd[0]) or cmd[0]
     print(f"[build] {' '.join(cmd)}  (cwd={cwd.relative_to(ROOT)})")
     subprocess.run(cmd, cwd=cwd, check=True)
 
