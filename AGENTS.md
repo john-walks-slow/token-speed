@@ -16,8 +16,7 @@ LLM API 延迟与速度检测工具：多服务商管理、跨模型批量测速
 - `backend/patrol_runner.py` — GH Actions 巡检入口（`python -m backend.patrol_runner`），产 JSONL 到 `website/patrol/data/`
 - `frontend/src/App.tsx` — 布局 + 状态编排；`components/` 各面板
 - `frontend/src/components/StatsPanel.tsx` — 统计聚合与图表（解析/输入双口径）
-- `website/` — 产品官网（纯静态零构建），push master 自动发布 GitHub Pages
-- `website/patrol/` — 巡检看板（`index.html` 零构建，`data/` 存 JSONL 结果）
+- `website/patrol/` — 巡检看板（`index.html` 零构建，`data/` 存 JSONL 结果），GitHub Pages 唯一内容
 - `config/patrol.json.example` — 巡检配置示例（fork 后改名 patrol.json + 填 Secrets）
 - `.github/workflows/deploy-website.yml` — Pages 部署（build_type=workflow）
 - `.github/workflows/patrol.yml` — 巡检 cron（每6h，13分错开整点）+ 结果 commit
@@ -37,7 +36,7 @@ python -m uvicorn backend.main:app --port 8000   # http://localhost:8000
 # 前端 dev 模式（vite 5173 代理 /api → 8000）
 cd frontend && npm run dev
 
-# 官网本地预览
+# 巡检看板本地预览
 python -m http.server 8899 -d website
 
 # 桌面版打包（Windows）
@@ -54,4 +53,3 @@ python build.py --zip
 - 两套数据独立不合并：本地 SQLite 与巡检 JSONL 不加 source 列、不合并视图，各看各的入口。
 - 前端改动后需 `npm run build` 才会反映到后端挂载的静态站。
 - 巡检看板（`website/patrol/`）是零构建纯 JS，原生 Canvas 图表；改代码后无需构建，push 即生效（deploy-website 自动发布）。
-- 官网入场动画是渐进增强：无 JS 默认可见，改 CSS 时勿破坏 `html.js` 前缀的隐藏规则。

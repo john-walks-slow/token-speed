@@ -151,8 +151,7 @@ config/
   patrol.json         # 巡逻配置（fork 后改这个 + 填 secrets）
   patrol.json.example # 配置示例
 website/
-  index.html          # 产品官网
-  patrol/index.html   # 巡逻看板（零构建）
+  patrol/index.html   # 巡逻看板（零构建），GitHub Pages 唯一入口
   patrol/data/        # 巡逻 JSONL 结果（workflow 自动 commit）
 .github/workflows/
   patrol.yml          # 巡逻 cron（每6h）+ 结果 commit
