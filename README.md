@@ -35,9 +35,9 @@ Fork 仓库 → 配置 Secrets → 启用 workflow → 看板自动跑起来。�
 | `GROQ_API_KEY` | [console.groq.com/keys](https://console.groq.com/keys) — 永久免费层，无需信用卡 |
 | `NVIDIA_API_KEY` | [build.nvidia.com](https://build.nvidia.com/settings) — 免费试用额度，无需信用卡 |
 | `GEMINI_API_KEY` | [aistudio.google.com](https://aistudio.google.com/apikey) — 免费层，无需信用卡 |
-| `SAMBANOVA_API_KEY` | [SambaNova API keys](https://cloud.sambanova.ai/plans/apikeys) — 免费层，无需绑定支付 |
+| `OPENCODE_API_KEY` | 固定填 `public` — [OpenCode Zen](https://opencode.ai/zen) 匿名免费层，无需注册 |
 
-巡逻目标已内置为「2026 年仍值得一用的免费 LLM API」：Groq、NVIDIA NIM、Google Gemini、SambaNova。密钥**绝不落盘**——`patrol.json` 只存环境变量名，巡逻 runner 从 `os.environ` 解析，结果 JSON 不含 `api_key`。
+巡逻目标已内置为「2026 年仍值得一用的免费 LLM API」：Groq、NVIDIA NIM、Google Gemini、OpenCode Zen。密钥**绝不落盘**——`patrol.json` 只存环境变量名，巡逻 runner 从 `os.environ` 解析，结果 JSON 不含 `api_key`。
 
 ### 2. 启用两个 workflow
 
