@@ -117,20 +117,6 @@
         "MedAIBase/.*",
         "PaddlePaddle/ERNIE-4.5-0.3B-PT"
       ]
-    },
-    {
-      "provider_name": "Kilo Gateway",
-      "base_url": "https://api.kilo.ai/api/gateway/v1",
-      "api_key_env": "KILO_API_KEY",
-      "protocol": "openai",
-      "discover": true,
-      "discover_url": "https://api.kilo.ai/api/gateway/models",
-      "models": [],
-      "whitelist": [".*:free"],
-      "blacklist": [
-        ".*inkling.*",
-        "nvidia/nemotron-3.5-content-safety:free"
-      ]
     }
   ]
 }

@@ -31,8 +31,6 @@ jobs:
           CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           MODELSCOPE_API_KEY: ${{ secrets.MODELSCOPE_API_KEY }}
-          # Kilo 匿名访问，无需真实 key
-          KILO_API_KEY: none
         run: python -m backend.patrol_runner
 
       - name: Commit patrol results
