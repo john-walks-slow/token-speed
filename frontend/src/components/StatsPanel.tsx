@@ -14,6 +14,7 @@ import {
   recordProviderKey,
   resolveProviderName,
 } from "@/lib/modelLabel";
+import { getModelColor } from "@/lib/chartColors";
 import {
   LineChart,
   Line,
@@ -31,9 +32,10 @@ import {
 
 type Metric = "tps" | "total_latency_ms" | "ttft_ms" | "success_rate";
 
-/** 柱状图轴 tick：长文本按固定字符数省略号截断（用双点 ‥），避免重叠；hover 显示全文。
+/** 柱状图轴 tick：长文本按可用宽度省略号截断（用双点 ‥），避免重叠；hover 显示全文。
  *
- * recharts 不把 band 宽度传给自定义 tick，故按保守字符上限截断。
+ * recharts 不把 band 宽度传给自定义 tick，故按可用像素宽度估算字符数：
+ * fontSize 11 下中文字符约 11px、半角字符约 6.6px，按全半角混合估算上限。
  * 横轴（X）居中、纵轴（Y）右对齐。
  */
 function ElidedTick({
@@ -41,16 +43,34 @@ function ElidedTick({
   y,
   payload,
   textAnchor = "middle",
-  maxChars = 9,
+  maxWidth = 80,
 }: {
   x?: number;
   y?: number;
   payload?: { value: string };
   textAnchor?: "start" | "middle" | "end";
-  maxChars?: number;
+  /** tick 文本可用像素宽度。 */
+  maxWidth?: number;
 }) {
   const full = payload?.value ?? "";
-  const shown = full.length > maxChars ? `${full.slice(0, maxChars - 2)}‥` : full;
+  // 按视觉宽度累计：全角/中文字符计 11px，半角计 6.6px（11px 字号下的近似）
+  const WIDE = 11, NARROW = 6.6;
+  let width = 0;
+  let cut = full.length;
+  for (let i = 0; i < full.length; i++) {
+    // CJK/全角区段按宽字符估算
+    const code = full.codePointAt(i)!;
+    const w = code > 0x2e7f ? WIDE : NARROW;
+    if (width + w > maxWidth) {
+      cut = i;
+      break;
+    }
+    width += w;
+  }
+  const shown =
+    cut < full.length
+      ? full.slice(0, Math.max(0, cut - 1)) + "‥"
+      : full;
   return (
     <text x={x} y={y} fill="oklch(0.708 0 0)" fontSize={11} textAnchor={textAnchor} dy={4}>
       <title>{full}</title>
@@ -107,21 +127,6 @@ function metricValue(t: TestHistory, metric: Exclude<Metric, "success_rate">): n
   if (!t.success) return metric === "tps" ? 0 : null;
   const v = t[metric];
   return typeof v === "number" ? v : null;
-}
-
-const MODEL_COLORS = [
-  "oklch(0.922 0.176 149.238)",   // green
-  "oklch(0.688 0.162 258.338)",   // blue
-  "oklch(0.769 0.188 70.08)",     // amber
-  "oklch(0.627 0.265 303.9)",     // purple
-  "oklch(0.715 0.143 215.221)",   // cyan
-  "oklch(0.828 0.189 84.429)",    // yellow
-  "oklch(0.64 0.082 229.91)",     // slate
-  "oklch(0.685 0.169 27.33)",     // red
-];
-
-function getModelColor(idx: number) {
-  return MODEL_COLORS[idx % MODEL_COLORS.length];
 }
 
 function rangeLabel(range: TimeRangeValue): string {
@@ -194,6 +199,19 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
   const [metric, setMetric] = useState<Metric>("tps");
   const [groupMode, setGroupMode] = useState<GroupMode>("actual");
   const [lastUpdated, setLastUpdated] = useState("");
+
+  // 对比图容器宽度：用于估算柱状图 X 轴每个 band 的 tick 可用宽度。
+  // loading 早返回时容器不存在，故用受控 ref：挂载后才建立 observer
+  const [comparisonEl, setComparisonEl] = useState<HTMLDivElement | null>(null);
+  const [comparisonWidth, setComparisonWidth] = useState(0);
+  useEffect(() => {
+    if (!comparisonEl) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) setComparisonWidth(e.contentRect.width);
+    });
+    ro.observe(comparisonEl);
+    return () => ro.disconnect();
+  }, [comparisonEl]);
 
   // 当前口径下的 model 与分组 key（provider|model），与 ModelSelector 组 key 一致
   // 解析模式下无有效 actual_model 时 model/key 为 null，表示该样本不计入统计
@@ -454,6 +472,13 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
   // 对比数据源：成功率用含失败样本的按对成功率，其余指标用按对中位数
   const comparisonData = isSuccessRate ? successRateData : modelComparison;
 
+  // 柱状图 X 轴每根柱子的 band 宽度估算：contentRect 已是内容盒宽（不含 padding），
+  // 直接除以柱数，tick 文本可用宽度再打 8 折
+  const barMaxWidth =
+    modelComparison.length > 0
+      ? Math.max(32, (comparisonWidth / modelComparison.length) * 0.8)
+      : 80;
+
   // 目录变化时清除已不存在的选中对（幽灵残留）
   useEffect(() => {
     setSelectedKeys((prev) => {
@@ -638,7 +663,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
             </span>
           </div>
           <Card className="border-0 bg-card/50">
-            <CardContent className="p-4">
+            <CardContent className="p-4" ref={setComparisonEl}>
               {isSuccessRate ? (
                 <ResponsiveContainer width="100%" height={Math.max(140, successRateData.length * 32)}>
                   <BarChart
@@ -662,7 +687,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
                       width={140}
                       tickLine={false}
                       axisLine={false}
-                      tick={<ElidedTick textAnchor="end" maxChars={9} />}
+                      tick={<ElidedTick textAnchor="end" maxWidth={132} />}
                     />
                     <Tooltip
                       contentStyle={{
@@ -700,7 +725,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
                       tickLine={false}
                       axisLine={false}
                       interval={0}
-                      tick={<ElidedTick maxChars={9} />}
+                      tick={<ElidedTick maxWidth={barMaxWidth} />}
                     />
                     <YAxis stroke="oklch(0.708 0 0)" fontSize={11} tickLine={false} axisLine={false} />
                     <Tooltip

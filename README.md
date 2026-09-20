@@ -75,24 +75,6 @@ python build.py --zip   # 构建前端 + PyInstaller 打包 + 压缩
 
 手机/局域网浏览器访问 `http://<本机IP>:8000/` 默认看到只读统计视图（管理接口仍需登录）。
 
-## Linux 服务器常驻部署
-
-前端构建后单进程（supervisord 示例）：
-
-```bash
-cd frontend && npm install && npm run build && cd ..
-python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
-# 打开 http://127.0.0.1:8000（后端自动挂载 frontend/dist）
-```
-
-```ini
-[program:token-speed]
-command=/path/to/token-speed/.venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
-directory=/path/to/token-speed
-autostart=true
-autorestart=true
-```
-
 ## 目录结构
 
 ```

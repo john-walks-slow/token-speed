@@ -43,6 +43,7 @@ declare module "lucide-react" {
   export const RefreshCw: Icon;
   export const RotateCcw: Icon;
   export const Save: Icon;
+  export const Search: Icon;
   export const Settings: Icon;
   export const Shield: Icon;
   export const Trash2: Icon;

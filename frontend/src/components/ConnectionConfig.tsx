@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -22,7 +22,7 @@ import {
   X,
   Pencil,
   Trash2,
-  RotateCcw,
+  Search,
   List,
   ChevronDown,
   ChevronUp,
@@ -42,10 +42,17 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
   const [formProtocol, setFormProtocol] = useState<"openai" | "anthropic">("openai");
   const [saving, setSaving] = useState(false);
 
-  // Model management dialog
+  // Model management dialog — 统一勾选清单模型
   const [managingProvider, setManagingProvider] = useState<Provider | null>(null);
-  const [manageInput, setManageInput] = useState("");
+  // 清单真相源：打开时以已添加模型初始化，勾选/取消即编辑，保存时一次性提交
+  const [selectedModels, setSelectedModels] = useState<Set<string>>(new Set());
+  // 检测到的候选模型（含已有），未在清单中的项保存时视为移除
+  const [allCandidates, setAllCandidates] = useState<string[]>([]);
+  const [searchInput, setSearchInput] = useState("");
+  const [manualInput, setManualInput] = useState("");
   const [detecting, setDetecting] = useState(false);
+  const [detectError, setDetectError] = useState("");
+  const [savingModels, setSavingModels] = useState(false);
 
   // Delete confirmation dialog
   const [pendingDelete, setPendingDelete] = useState<Provider | null>(null);
@@ -64,41 +71,48 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
     refresh();
   }, []);
 
-  /** 合并检测结果，保留已有模型的添加顺序，仅追加新检测到的模型。 */
-  const mergeDetectedModels = useCallback((existing: string[], detected: string[]) => {
-    const seen = new Set(existing);
-    const merged = [...existing];
-    for (const m of detected) {
-      if (!seen.has(m)) {
-        seen.add(m);
-        merged.push(m);
-      }
-    }
-    return merged;
-  }, []);
-
-  const handleDetectModels = useCallback(
-    async (p: Provider) => {
-      setDetecting(true);
-      try {
-        const res = await connect(p.base_url, p.api_key, p.protocol);
-        const modelIds = res.success ? res.models.map((m) => m.id) : [];
-        if (modelIds.length > 0) {
-          const merged = mergeDetectedModels(p.models || [], modelIds);
-          const updated = await updateProviderModels(p.id, merged);
-          if (updated && managingProvider?.id === p.id) {
-            setManagingProvider(updated);
+  const handleDetectModels = useCallback(async (p: Provider) => {
+    setDetecting(true);
+    setDetectError("");
+    try {
+      const res = await connect(p.base_url, p.api_key, p.protocol);
+      if (res.success) {
+        // 检测结果并入候选集（保留已有顺序，追加新项）；勾选状态不变
+        const known = new Set(allCandidates);
+        const merged = [...allCandidates];
+        for (const m of res.models.map((x) => x.id)) {
+          if (!known.has(m)) {
+            known.add(m);
+            merged.push(m);
           }
         }
-        await refresh();
-      } catch {
-        // ignore
-      } finally {
-        setDetecting(false);
+        setAllCandidates(merged);
+      } else {
+        setDetectError(res.error || "检测失败");
       }
-    },
-    [refresh, managingProvider, mergeDetectedModels]
-  );
+    } catch {
+      setDetectError("检测失败，请检查网络或 Base URL");
+    } finally {
+      setDetecting(false);
+    }
+  }, [allCandidates]);
+
+  /** 保存：把清单当前状态一次性写入（增删都在其中）。 */
+  const handleSaveModels = async () => {
+    if (!managingProvider) return;
+    setSavingModels(true);
+    try {
+      // 保留原有顺序中的保留项，新勾选项按清单顺序追加
+      const original = managingProvider.models || [];
+      const kept = original.filter((m) => selectedModels.has(m));
+      const added = allCandidates.filter((m) => selectedModels.has(m) && !original.includes(m));
+      const updated = await updateProviderModels(managingProvider.id, [...kept, ...added]);
+      setManagingProvider(updated);
+      await refresh();
+    } finally {
+      setSavingModels(false);
+    }
+  };
 
   const handleSaveProvider = async () => {
     if (!formName.trim() || !formUrl.trim()) return;
@@ -154,27 +168,29 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
     }
   };
 
-  const handleAddModel = async () => {
-    if (!managingProvider || !manageInput.trim()) return;
-    const newModels = [...(managingProvider.models || []), manageInput.trim()];
-    const updated = await updateProviderModels(managingProvider.id, newModels);
-    if (updated) setManagingProvider(updated);
-    await refresh();
-    setManageInput("");
-  };
-
-  const handleRemoveModel = async (modelId: string) => {
-    if (!managingProvider) return;
-    const newModels = (managingProvider.models || []).filter((m) => m !== modelId);
-    const updated = await updateProviderModels(managingProvider.id, newModels);
-    if (updated) setManagingProvider(updated);
-    await refresh();
+  /** 手动添加：作为候选项插入清单顶部并自动勾选。 */
+  const handleAddManualModel = () => {
+    const id = manualInput.trim();
+    if (!id) return;
+    setAllCandidates((prev) => (prev.includes(id) ? prev : [id, ...prev]));
+    setSelectedModels((prev) => new Set(prev).add(id));
+    setManualInput("");
   };
 
   const openManage = (p: Provider) => {
     setManagingProvider(p);
-    setManageInput("");
+    setSelectedModels(new Set(p.models || []));
+    setAllCandidates(p.models || []);
+    setSearchInput("");
+    setManualInput("");
+    setDetectError("");
   };
+
+  /** 清单与已保存列表是否不一致（有未保存的增删）。 */
+  const dirtyModels =
+    !!managingProvider &&
+    ((managingProvider.models || []).some((m) => !selectedModels.has(m)) ||
+      [...selectedModels].some((m) => !(managingProvider.models || []).includes(m)));
 
   const header = (
     <div className="flex items-center justify-between">
@@ -234,7 +250,7 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
       <div className="space-y-1.5">
         {/* Add form at top when adding */}
         {showForm && !editingId && (
-          <Card className="border border-primary/40 bg-primary/5">
+          <Card className="border-primary/40 bg-card">
             <CardContent className="p-3 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium">添加服务商</span>
@@ -250,7 +266,7 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
           const isEditing = editingId === p.id && showForm;
           const hasCached = p.models && p.models.length > 0;
           return isEditing ? (
-            <Card key={p.id} className="border border-primary/40 bg-primary/5">
+            <Card key={p.id} className="border-primary/40 bg-card">
               <CardContent className="p-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium">编辑服务商</span>
@@ -273,14 +289,6 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
                         {p.models.length}
                       </Badge>
                     )}
-                    <Badge
-                      variant="outline"
-                      className={`text-[10px] px-1 py-0 ${
-                        p.protocol === "anthropic" ? "text-amber-600 border-amber-600/40" : "text-muted-foreground"
-                      }`}
-                    >
-                      {p.protocol === "anthropic" ? "Anthropic 格式" : "OpenAI 兼容"}
-                    </Badge>
                   </div>
                   <div className="flex items-center gap-0.5 shrink-0">
                     <button
@@ -306,7 +314,10 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
                     </button>
                   </div>
                 </div>
-                <div className="text-[10px] text-muted-foreground truncate mt-0.5">{p.base_url}</div>
+                <div className="flex items-center text-[10px] text-muted-foreground mt-0.5">
+                  <span className="truncate">{p.base_url}</span>
+                  <span className="shrink-0"> · {p.protocol === "anthropic" ? "Anthropic 格式" : "OpenAI 兼容"}</span>
+                </div>
               </CardContent>
             </Card>
           );
@@ -372,46 +383,103 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
           <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4" onClick={() => setManagingProvider(null)}>
             <Card className="w-full max-w-md border-border bg-background" onClick={(e) => e.stopPropagation()}>
               <CardContent className="p-4 space-y-3">
+                {/* 标题行 */}
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">{managingProvider.name} — 模型管理</span>
-                  <button onClick={() => setManagingProvider(null)} className="text-muted-foreground hover:text-foreground cursor-pointer">
+                  <span className="text-sm font-medium truncate">{managingProvider.name} — 模型管理</span>
+                  <button onClick={() => setManagingProvider(null)} className="text-muted-foreground hover:text-foreground cursor-pointer shrink-0">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
 
-                {/* Detect button */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full"
-                  onClick={() => handleDetectModels(managingProvider)}
-                  disabled={detecting}
-                >
-                  {detecting ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
-                  ) : (
-                    <RotateCcw className="w-3.5 h-3.5 mr-1" />
-                  )}
-                  检测模型
-                </Button>
-
-                <div className="flex gap-2">
-                  <Input placeholder="输入模型名称" value={manageInput} onChange={(e) => setManageInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddModel()} />
-                  <Button size="sm" onClick={handleAddModel} disabled={!manageInput.trim()}>添加</Button>
+                {/* 第一行：纯搜索框 */}
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-muted-foreground absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Input
+                    className="pl-8 h-8 text-xs"
+                    placeholder="搜索模型…"
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                  />
                 </div>
-                <div className="max-h-48 overflow-y-auto space-y-1">
-                  {(managingProvider.models || []).length === 0 ? (
-                    <p className="text-xs text-muted-foreground py-2">暂无模型，点击上方"检测模型"自动检测或手动添加</p>
-                  ) : (
-                    (managingProvider.models || []).map((m) => (
-                      <div key={m} className="flex items-center justify-between py-1 px-2 rounded hover:bg-muted/50">
-                        <span className="text-xs">{m}</span>
-                        <button onClick={() => handleRemoveModel(m)} className="text-muted-foreground hover:text-destructive cursor-pointer">
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    ))
-                  )}
+
+                {/* 第二行：检测 + 添加输入 */}
+                <div className="flex gap-2">
+                  <Input
+                    className="h-8 text-xs flex-1"
+                    placeholder="手动添加模型 ID，如 gpt-5.2"
+                    value={manualInput}
+                    onChange={(e) => setManualInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleAddManualModel()}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 shrink-0"
+                    onClick={handleAddManualModel}
+                    disabled={!manualInput.trim()}
+                  >
+                    添加
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 shrink-0"
+                    onClick={() => handleDetectModels(managingProvider)}
+                    disabled={detecting}
+                  >
+                    {detecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                    检测
+                  </Button>
+                </div>
+
+                {detectError && <p className="text-xs text-destructive">{detectError}</p>}
+
+                {/* 统一勾选清单 */}
+                <ModelChecklist
+                  candidates={allCandidates}
+                  selected={selectedModels}
+                  search={searchInput}
+                  onToggle={(m) => {
+                    setSelectedModels((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(m)) next.delete(m);
+                      else next.add(m);
+                      return next;
+                    });
+                  }}
+                  onSetAll={(ids, select) => {
+                    setSelectedModels((prev) => {
+                      const next = new Set(prev);
+                      for (const id of ids) {
+                        if (select) next.add(id);
+                        else next.delete(id);
+                      }
+                      return next;
+                    });
+                  }}
+                  onRemove={(m) => {
+                    setSelectedModels((prev) => {
+                      const next = new Set(prev);
+                      next.delete(m);
+                      return next;
+                    });
+                    setAllCandidates((prev) => prev.filter((c) => c !== m));
+                  }}
+                />
+
+                {/* 底部操作栏 */}
+                <div className="flex items-center gap-2 pt-1 border-t border-border">
+                  <span className="text-xs text-muted-foreground flex-1">
+                    已选 {selectedModels.size} / {allCandidates.length}
+                    {dirtyModels && " · 未保存"}
+                  </span>
+                  <Button variant="ghost" size="sm" onClick={() => setManagingProvider(null)}>
+                    取消
+                  </Button>
+                  <Button size="sm" onClick={handleSaveModels} disabled={!dirtyModels || savingModels}>
+                    {savingModels ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                    保存
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -447,5 +515,92 @@ export default function ConnectionConfig({ onProvidersChange }: Props) {
           document.body
         )}
     </>
+  );
+}
+
+/** 统一勾选清单：已添加 + 检测到的候选模型，按搜索过滤，支持全选/清空。 */
+function ModelChecklist({
+  candidates,
+  selected,
+  search,
+  onToggle,
+  onSetAll,
+  onRemove,
+}: {
+  candidates: string[];
+  selected: Set<string>;
+  search: string;
+  onToggle: (model: string) => void;
+  onSetAll: (ids: string[], select: boolean) => void;
+  onRemove: (model: string) => void;
+}) {
+  const filtered = useMemo(
+    () => candidates.filter((m) => m.toLowerCase().includes(search.trim().toLowerCase())),
+    [candidates, search]
+  );
+  const selectedCount = filtered.filter((m) => selected.has(m)).length;
+  const allFilteredSelected = filtered.length > 0 && selectedCount === filtered.length;
+
+  if (candidates.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground py-4 text-center">
+        暂无模型，点击「检测」自动发现或手动添加
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <span className="flex-1">
+          {search.trim() ? `匹配 ${filtered.length} / ${candidates.length}` : `${candidates.length} 个模型`}
+        </span>
+        {filtered.length > 0 && (
+          <button
+            type="button"
+            className="hover:text-foreground cursor-pointer transition-colors"
+            onClick={() => onSetAll(filtered, !allFilteredSelected)}
+          >
+            {allFilteredSelected ? "取消全选" : "全选"}
+          </button>
+        )}
+      </div>
+      <div className="max-h-64 overflow-y-auto space-y-0.5 -mx-1 px-1">
+        {filtered.length === 0 ? (
+          <p className="text-xs text-muted-foreground py-3 text-center">无匹配「{search.trim()}」的模型</p>
+        ) : (
+          filtered.map((m) => {
+            const checked = selected.has(m);
+            return (
+              <div
+                key={m}
+                className={`group flex items-center gap-2 py-1.5 px-2 rounded transition-colors ${
+                  checked ? "bg-primary/10" : "hover:bg-muted/50"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="accent-primary h-3.5 w-3.5 shrink-0 cursor-pointer"
+                  checked={checked}
+                  onChange={() => onToggle(m)}
+                  id={`model-check-${m}`}
+                />
+                <label htmlFor={`model-check-${m}`} className="text-xs truncate flex-1 cursor-pointer">
+                  {m}
+                </label>
+                <button
+                  type="button"
+                  title="从列表移除"
+                  onClick={() => onRemove(m)}
+                  className="shrink-0 text-muted-foreground hover:text-destructive cursor-pointer transition-colors"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
   );
 }

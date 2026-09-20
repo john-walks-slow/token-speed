@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { inkColorOn } from "@/lib/chartColors";
 
 export interface ModelGroup {
   id: string;
@@ -95,7 +96,11 @@ export default function ModelSelector({
                       className={`transition-all text-xs ${
                         isSelected ? "" : "hover:border-primary/50 hover:text-foreground"
                       }`}
-                      style={selectedColor ? { backgroundColor: selectedColor } : undefined}
+                      style={
+                        selectedColor
+                          ? { backgroundColor: selectedColor, color: inkColorOn(selectedColor) }
+                          : undefined
+                      }
                     >
                       {m}
                     </Badge>
