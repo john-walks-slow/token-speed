@@ -16,7 +16,7 @@ def test_load_patrol_config_example():
     assert cfg.targets[0].provider_name == "Groq"
     assert cfg.targets[0].api_key_env == "GROQ_API_KEY"
     assert cfg.targets[0].protocol == "openai"
-    assert "qwen/qwen3.6-27b" in cfg.targets[0].models
+    assert "openai/gpt-oss-20b" in cfg.targets[0].models
     # NVIDIA NIM target
     assert cfg.targets[1].provider_name == "NVIDIA NIM"
     assert cfg.targets[1].base_url == "https://integrate.api.nvidia.com/v1"
