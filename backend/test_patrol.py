@@ -12,13 +12,19 @@ from .patrol_config import PatrolConfig, PatrolTarget, load_patrol_config
 def test_load_patrol_config_example():
     """example 配置能正确加载，字段一一对应。"""
     cfg = load_patrol_config("config/patrol.json.example")
-    assert len(cfg.targets) == 3
-    assert cfg.targets[0].provider_name == "OpenAI"
-    assert cfg.targets[0].api_key_env == "OPENAI_API_KEY"
+    assert len(cfg.targets) == 4
+    assert cfg.targets[0].provider_name == "Groq"
+    assert cfg.targets[0].api_key_env == "GROQ_API_KEY"
     assert cfg.targets[0].protocol == "openai"
-    assert "gpt-4o-mini" in cfg.targets[0].models
-    # Anthropic target
-    assert cfg.targets[2].protocol == "anthropic"
+    assert "llama-3.3-70b-versatile" in cfg.targets[0].models
+    # NVIDIA NIM target
+    assert cfg.targets[1].provider_name == "NVIDIA NIM"
+    assert cfg.targets[1].base_url == "https://integrate.api.nvidia.com/v1"
+    # Google Gemini target
+    assert cfg.targets[2].provider_name == "Google Gemini"
+    assert cfg.targets[2].base_url == "https://generativelanguage.googleapis.com/v1beta/openai/"
+    # SambaNova target
+    assert cfg.targets[3].provider_name == "SambaNova"
     assert cfg.stream is True
     assert cfg.max_tokens == 256
     assert cfg.temperature is None
