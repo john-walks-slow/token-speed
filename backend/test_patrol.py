@@ -24,7 +24,8 @@ def test_load_patrol_config_example():
     assert cfg.targets[2].provider_name == "Google Gemini"
     assert cfg.targets[2].base_url == "https://generativelanguage.googleapis.com/v1beta/openai/"
     # SambaNova target
-    assert cfg.targets[3].provider_name == "SambaNova"
+    assert cfg.targets[3].provider_name == "OpenCode Zen"
+    assert "big-pickle" in cfg.targets[3].models
     assert cfg.stream is True
     assert cfg.max_tokens == 256
     assert cfg.temperature is None
