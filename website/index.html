@@ -138,6 +138,7 @@ section { margin-bottom: 40px; }
 .results-table .model-cell .provider { font-weight: 400; font-size: 11px; color: var(--text-dim); display: block; margin-top: 1px; }
 .results-table .ok { color: var(--green); }
 .results-table .fail { color: var(--red); }
+.results-table .warn-text { color: var(--amber); }
 .results-table .err-msg { font-size: 11px; color: var(--text-faint); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .results-table .spark-cell { padding: 5px 10px; }
 .results-table .spark-cell canvas { display: block; }
@@ -218,11 +219,20 @@ footer { border-top: 1px solid var(--border); padding: 32px 0; margin-top: 20px;
   <!-- Latest run results -->
   <section>
     <div class="sec-head">
-      <div class="sec-title"><span class="sec-kicker">/ Latest</span> 最近一次巡检</div>
-      <div class="filters" id="providerFilters">
-        <div class="filter-group">
+      <div class="sec-title"><span class="sec-kicker" id="resultsKicker">/ Latest</span> <span id="resultsTitle">最近一次巡检</span></div>
+      <div class="filters">
+        <div class="filter-group" id="providerFilters">
           <span class="filter-label">Provider</span>
           <span id="providerChips" style="display:flex;flex-wrap:wrap;gap:6px"></span>
+        </div>
+        <div class="filter-group">
+          <span class="filter-label">时间</span>
+          <span id="rangeChips" style="display:flex;flex-wrap:wrap;gap:6px">
+            <button class="chip active" data-range="latest">最近一次</button>
+            <button class="chip" data-range="24h">24h</button>
+            <button class="chip" data-range="7d">7 天</button>
+            <button class="chip" data-range="all">全部</button>
+          </span>
         </div>
       </div>
     </div>
@@ -277,9 +287,16 @@ const METRIC_LABELS = {
   success_rate: '成功率 (%)',
 };
 const SPARK_WINDOW_MS = 24 * 3600 * 1000;
+const RANGE_DEFS = {
+  latest: { label: '最近一次', windowMs: 0 },
+  '24h':  { label: '最近 24 小时', windowMs: SPARK_WINDOW_MS },
+  '7d':   { label: '最近 7 天', windowMs: 7 * 24 * 3600 * 1000 },
+  all:    { label: '全部', windowMs: Infinity },
+};
 
 let allRuns = [];      // 按时间升序的 run 记录
 let activeMetric = 'tps';
+let activeRange = 'latest';
 let activeKeys = new Set(); // 选中的 (provider|model) 对
 let activeProviders = new Set(); // 空 = 全选
 let providerColor = {}; // provider -> 颜色
@@ -425,9 +442,8 @@ function renderProviderChips() {
       } else {
         activeProviders.add(p);
       }
-      const latest = allRuns[allRuns.length - 1];
       renderProviderChips();
-      renderResults(latest);
+      renderResults();
       drawChart();
     });
   });
@@ -473,13 +489,14 @@ function renderMetrics(latestRun) {
   ).join('');
 }
 
-// 取某 pair 最近 24h 的指标序列：[{time, value}]
+// 取某 pair 在当前时间范围内的指标序列：[{time, value}]
 function sparkSeries(pair) {
   const tEnd = new Date(allRuns[allRuns.length - 1].started_at).getTime();
+  const windowMs = activeRange === 'latest' ? SPARK_WINDOW_MS : RANGE_DEFS[activeRange].windowMs;
   const series = [];
   for (const run of allRuns) {
     const t = new Date(run.started_at).getTime();
-    if (t < tEnd - SPARK_WINDOW_MS) continue;
+    if (t < tEnd - windowMs) continue;
     const point = runToPoints(run)[pair];
     const v = point && point[activeMetric];
     if (v != null) series.push({ time: t, value: v });
@@ -500,46 +517,65 @@ function smoothPath(ctx, pts) {
   }
 }
 
-function renderResults(latestRun) {
+// 当前时间范围内的 runs（latest = 仅最近一次）
+function runsInRange() {
+  if (activeRange === 'latest') return [allRuns[allRuns.length - 1]];
+  const tEnd = new Date(allRuns[allRuns.length - 1].started_at).getTime();
+  const windowMs = RANGE_DEFS[activeRange].windowMs;
+  return allRuns.filter(run => new Date(run.started_at).getTime() >= tEnd - windowMs);
+}
+
+function renderResults() {
   const el = document.getElementById('resultsCard');
-  if (!latestRun || !latestRun.results.length) {
+  const runs = runsInRange();
+  if (!runs.length || !runs[0].results.length) {
     el.innerHTML = '<div class="empty">暂无巡检数据</div>'; return;
   }
-  const visible = latestRun.results.filter(r => providerVisible(providerOf(r)));
-  if (!visible.length) { el.innerHTML = '<div class="empty">该 Provider 无数据</div>'; return; }
-  // 按 tps 降序，失败排最后
-  const sorted = [...visible].sort((a, b) => {
-    if (a.success !== b.success) return b.success - a.success;
-    return (b.tps || 0) - (a.tps || 0);
-  });
-  const rows = sorted.map(r => {
-    const model = r.actual_model && r.actual_model !== 'error' && r.actual_model !== r.model
-      ? `${r.model}（${r.actual_model}）` : r.model;
-    const provider = providerOf(r);
-    const status = r.success
-      ? '<span class="ok">✓</span>'
-      : '<span class="fail">✗</span>';
-    const tps = r.success && r.tps != null ? r.tps.toFixed(1) : '—';
-    const itl = r.success && r.itl_ms != null ? formatItl(r.itl_ms) + 'ms' : '—';
-    const ttft = r.success && r.ttft_ms != null ? Math.round(r.ttft_ms) + 'ms' : '—';
-    const latency = r.success ? Math.round(r.total_latency_ms) + 'ms' : '—';
-    const tokens = r.success ? `${r.tokens_generated}` : '—';
-    const think = r.success && r.reasoning_tokens > 0
-      ? `<span style="color:#c084fc">${r.reasoning_tokens}+${r.content_tokens}</span>` : '';
-    const err = !r.success ? `<div class="err-msg" title="${escapeHtml(r.error_message || '')}">${escapeHtml(r.error_message || '')}</div>` : '';
-    return `<tr data-pair="${escapeHtml(pairKey(r))}">
-      <td>${status}</td>
-      <td class="model-cell">${escapeHtml(model)}<span class="provider">${escapeHtml(provider)}</span></td>
+
+  // 标题与 sparkline 列头跟随范围
+  document.getElementById('resultsKicker').textContent = '/ ' + (activeRange === 'latest' ? 'Latest' : 'Stats');
+  document.getElementById('resultsTitle').textContent = activeRange === 'latest' ? '最近一次巡检' : `${RANGE_DEFS[activeRange].label}聚合`;
+  const sparkHead = activeRange === 'latest' ? '24h' : '趋势';
+
+  const aggByPair = {};
+  for (const run of runs) {
+    for (const [k, p] of Object.entries(runToPoints(run))) {
+      if (!aggByPair[k]) aggByPair[k] = { model: p.model, provider: p.provider, tps: [], itl: [], ttft: [], latency: [], ok: 0, n: 0 };
+      const a = aggByPair[k];
+      a.n += p.count;
+      a.ok += p.count * (p.success_rate / 100);
+      if (p.tps != null) a.tps.push(p.tps);
+      if (p.itl_ms != null) a.itl.push(p.itl_ms);
+      if (p.ttft_ms != null) a.ttft.push(p.ttft_ms);
+      if (p.total_latency_ms != null) a.latency.push(p.total_latency_ms);
+    }
+  }
+
+  const pairs = Object.entries(aggByPair)
+    .filter(([k]) => providerVisible(k.split('|')[0]))
+    .sort((a, b) => (b[1].tps.length ? median(b[1].tps) : 0) - (a[1].tps.length ? median(a[1].tps) : 0));
+  if (!pairs.length) { el.innerHTML = '<div class="empty">该 Provider 无数据</div>'; return; }
+
+  const rows = pairs.map(([k, a]) => {
+    const successRate = a.n ? Math.round(a.ok / a.n * 1000) / 10 : 0;
+    const rateCls = successRate >= 95 ? 'ok' : successRate >= 50 ? 'warn-text' : 'fail';
+    const tps = a.tps.length ? median(a.tps).toFixed(1) : '—';
+    const itl = a.itl.length ? formatItl(median(a.itl)) + 'ms' : '—';
+    const ttft = a.ttft.length ? Math.round(median(a.ttft)) + 'ms' : '—';
+    const latency = a.latency.length ? Math.round(median(a.latency)) + 'ms' : '—';
+    return `<tr data-pair="${escapeHtml(k)}">
+      <td class="${rateCls}">${successRate}%</td>
+      <td class="model-cell">${escapeHtml(a.model)}<span class="provider">${escapeHtml(a.provider)}</span></td>
       <td>${tps}</td>
       <td class="hide-mobile">${itl}</td>
       <td class="hide-mobile">${ttft}</td>
       <td class="hide-mobile">${latency}</td>
-      <td class="hide-mobile">${tokens} ${think}</td>
-      <td class="spark-cell hide-mobile"><canvas data-pair="${escapeHtml(pairKey(r))}" width="120" height="30"></canvas></td>
-    </tr>${err ? `<tr><td colspan="8" style="padding:0 16px 8px;border-bottom:1px solid var(--border)">${err}</td></tr>` : ''}`;
+      <td class="hide-mobile">${a.n} 次</td>
+      <td class="spark-cell hide-mobile"><canvas data-pair="${escapeHtml(k)}" width="120" height="30"></canvas></td>
+    </tr>`;
   }).join('');
   el.innerHTML = `<table class="results-table"><thead><tr>
-    <th style="width:30px"></th><th>模型</th><th>TPS</th><th class="hide-mobile">ITL</th><th class="hide-mobile">TTFT</th><th class="hide-mobile">延迟</th><th class="hide-mobile">Tokens</th><th class="hide-mobile" title="最近 24h · ${METRIC_LABELS[activeMetric]}">24h</th>
+    <th>成功率</th><th>模型</th><th>TPS</th><th class="hide-mobile">ITL</th><th class="hide-mobile">TTFT</th><th class="hide-mobile">延迟</th><th class="hide-mobile">次数</th><th class="hide-mobile" title="${METRIC_LABELS[activeMetric]}">${sparkHead}</th>
   </tr></thead><tbody>${rows}</tbody></table>`;
   drawSparks();
 }
@@ -575,8 +611,9 @@ function drawSparks() {
     const last = pts[pts.length - 1];
     ctx.fillStyle = color;
     ctx.beginPath(); ctx.arc(last.x, last.y, 2, 0, Math.PI * 2); ctx.fill();
-    // 悬停提示：窗口内各点值
-    cv.title = `${METRIC_LABELS[activeMetric]} · 最近24h\n` +
+    // 悬停提示：范围内各点值
+    const rangeLabel = activeRange === 'latest' ? '最近24h' : RANGE_DEFS[activeRange].label;
+    cv.title = `${METRIC_LABELS[activeMetric]} · ${rangeLabel}\n` +
       series.map(d => `${formatTime(d.time)}  ${formatMetricValue(d.value)}`).join('\n');
   });
 }
@@ -820,8 +857,17 @@ document.querySelectorAll('[data-metric]').forEach(btn => {
     btn.classList.add('active');
     activeMetric = btn.dataset.metric;
     activeKeys.clear(); // 切换指标重置选中
-    renderResults(allRuns[allRuns.length - 1]); // 表头 tooltip + sparkline 跟随指标
+    renderResults(); // 表头 tooltip + sparkline 跟随指标
     drawChart();
+  });
+});
+
+document.querySelectorAll('[data-range]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-range]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeRange = btn.dataset.range;
+    renderResults();
   });
 });
 
@@ -841,7 +887,7 @@ async function init() {
   renderLastRun(latest);
   renderMetrics(latest);
   renderProviderChips();
-  renderResults(latest);
+  renderResults();
   drawChart();
 }
 
