@@ -48,12 +48,20 @@ async def discover_models(base_url: str, api_key: str, timeout: float, discover_
         return []
 
 
-async def run_patrol(config_path: str, data_dir: str = DEFAULT_DATA_DIR) -> str:
+async def run_patrol(config_path: str, data_dir: str = DEFAULT_DATA_DIR,
+                     only_providers: list[str] | None = None) -> str:
     """执行一次巡检，结果写入 data_dir 下的按天 JSONL 文件。
 
-    返回写入的文件路径。
+    only_providers: 非空时仅巡检列表内的 provider_name（手动按需触发用）。
+    返回写入的文件路径（跳过时返回空串）。
     """
     cfg = load_patrol_config(config_path)
+
+    if only_providers:
+        cfg.targets = [t for t in cfg.targets if t.provider_name in only_providers]
+        if not cfg.targets:
+            print(f"patrol: no target matches {only_providers}, skipping", file=sys.stderr)
+            return ""
 
     # discover=true 的 target 先拉上游全量模型列表（与显式 models 并集后过过滤规则）
     timeout = cfg.timeout or 120.0
@@ -122,7 +130,9 @@ async def run_patrol(config_path: str, data_dir: str = DEFAULT_DATA_DIR) -> str:
 def main() -> None:
     config_path = os.environ.get("PATROL_CONFIG", "config/patrol.json")
     data_dir = os.environ.get("PATROL_DATA_DIR", DEFAULT_DATA_DIR)
-    asyncio.run(run_patrol(config_path, data_dir))
+    raw = os.environ.get("PATROL_PROVIDERS", "").strip()
+    only = [p.strip() for p in raw.split(",") if p.strip()] or None
+    asyncio.run(run_patrol(config_path, data_dir, only_providers=only))
 
 
 if __name__ == "__main__":

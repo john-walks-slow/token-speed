@@ -45,7 +45,7 @@ Fork 仓库 → 配置 Secrets → 启用 workflow → 看板自动跑起来。�
 
 | Workflow | 作用 |
 |---|---|
-| **Token Speed Patrol** (`.github/workflows/patrol.yml`) | 每 6 小时测速一次，结果 commit 回 `website/data/` |
+| **Token Speed Patrol** (`.github/workflows/patrol.yml`) | 按 cron 周期测速（默认每 6h，可在 yaml 改），结果 commit 回 `website/data/` |
 | **Deploy website** (`.github/workflows/deploy-website.yml`) | push master 自动发布 GitHub Pages |
 
 到 **Settings → Pages → Build and deployment → Source: GitHub Actions** 启用 Pages。
@@ -76,6 +76,10 @@ Fork 仓库 → 配置 Secrets → 启用 workflow → 看板自动跑起来。�
 ```
 
 `protocol` 支持 `openai` 与 `anthropic`（Anthropic 原生端点用 `anthropic`）。新增服务商时，记得在 `patrol.yml` 的 `env:` 段加上对应的 `${{ secrets.XXX }}` 映射。
+
+**动态模型发现**：`"discover": true` 时 runner 会从上游 `{base_url}/models`（或 `discover_url` 指定的端点）拉取全量模型列表，与手写的 `models` 并集后依次过 `whitelist`、`blacklist`（均为 regex，fullmatch；whitelist 空 = 全保留）。上游新增/下架模型自动跟随，无需改配置。
+
+**巡检周期**：在 `patrol.yml` 的 `schedule.cron` 配置（默认每 6 小时）。**按需巡检**：手动 Run workflow 时填 `providers` 输入（逗号分隔 `provider_name`），只测指定服务商。
 
 ---
 

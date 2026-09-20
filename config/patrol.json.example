@@ -28,17 +28,15 @@
       "base_url": "https://integrate.api.nvidia.com/v1",
       "api_key_env": "NVIDIA_API_KEY",
       "protocol": "openai",
+      "discover": true,
       "models": [
         "openai/gpt-oss-20b",
-        "nvidia/nemotron-3.5-lightning-30b-a3b",
-        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-        "deepseek-ai/deepseek-v4-flash-0731",
-        "google/gemma-4-31b-it",
-        "z-ai/glm-5.3-flash",
-        "moonshotai/kimi-k3",
-        "mistralai/mistral-nemotron",
-        "nvidia/nemotron-3-super-120b-a12b",
-        "nvidia/llama-3.1-nemotron-ultra-253b-v1"
+        "nvidia/nemotron-3.5-lightning-30b-a3b"
+      ],
+      "blacklist": [
+        ".*(embed|retriever|clip|parse|reward|guard|safety).*",
+        "nvidia/ai-synthetic-video-detector",
+        "meta/llama-3.2-11b-vision-instruct"
       ]
     },
     {
@@ -62,20 +60,16 @@
       ]
     },
     {
-      "provider_name": "OpenCode Zen",
-      "base_url": "https://opencode.ai/zen/v1",
-      "api_key_env": "OPENCODE_API_KEY",
+      "provider_name": "OpenRouter",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY",
       "protocol": "openai",
-      "models": [
-        "big-pickle",
-        "jev-1.13-free",
-        "deepseek-v4-flash-free",
-        "muse-spark-1.3-contributor-free",
-        "muse-spark-1.2-contributor-free",
-        "mimo-v2.5-free",
-        "ling-3.0-flash-fin-free",
-        "nemotron-3-ultra-free",
-        "nemotron-3.5-lightning-free"
+      "discover": true,
+      "models": [],
+      "whitelist": [".*:free"],
+      "blacklist": [
+        ".*inkling.*",
+        "nvidia/nemotron-3.5-content-safety:free"
       ]
     }
   ]

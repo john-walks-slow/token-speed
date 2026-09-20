@@ -17,15 +17,17 @@ def test_load_patrol_config_example():
     assert cfg.targets[0].api_key_env == "GROQ_API_KEY"
     assert cfg.targets[0].protocol == "openai"
     assert "openai/gpt-oss-20b" in cfg.targets[0].models
-    # NVIDIA NIM target
+    # NVIDIA NIM target（动态发现）
     assert cfg.targets[1].provider_name == "NVIDIA NIM"
     assert cfg.targets[1].base_url == "https://integrate.api.nvidia.com/v1"
+    assert cfg.targets[1].discover is True
     # Google Gemini target
     assert cfg.targets[2].provider_name == "Google Gemini"
     assert cfg.targets[2].base_url == "https://generativelanguage.googleapis.com/v1beta/openai/"
-    # SambaNova target
-    assert cfg.targets[3].provider_name == "OpenCode Zen"
-    assert "big-pickle" in cfg.targets[3].models
+    # OpenRouter target（discover + whitelist/blacklist）
+    assert cfg.targets[3].provider_name == "OpenRouter"
+    assert cfg.targets[3].discover is True
+    assert cfg.targets[3].whitelist == [".*:free"]
     assert cfg.stream is True
     assert cfg.max_tokens == 256
     assert cfg.temperature is None
