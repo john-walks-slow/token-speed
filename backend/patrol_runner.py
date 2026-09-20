@@ -55,6 +55,7 @@ async def run_patrol(config_path: str, data_dir: str = DEFAULT_DATA_DIR) -> str:
         concurrency=cfg.concurrency,
         iterations=cfg.iterations,
         max_rpm=cfg.max_rpm,
+        timeout=cfg.timeout,
         sink=json_sink,
     )
 

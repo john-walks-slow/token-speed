@@ -64,7 +64,7 @@ def test_patrol_runner_writes_jsonl(monkeypatch, tmp_path):
 
     async def fake_execute(tests, prompt, max_tokens, temperature, stream,
                            concurrency, iterations, max_rpm=-1,
-                           on_progress=None, sink=None):
+                           on_progress=None, sink=None, timeout=None):
         results = [{
             "id": "r1", "base_url": tests[0]["base_url"], "model": tests[0]["model"],
             "actual_model": tests[0]["model"], "provider_id": "", "provider_name": tests[0]["provider_name"],

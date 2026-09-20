@@ -169,6 +169,7 @@ async def run_speed_test(
     provider_id: str = "",
     provider_name: str = "",
     protocol: str = "openai",
+    timeout: float | None = None,
 ) -> dict:
     """Run a single speed test against an OpenAI-compatible / Anthropic native API.
 
@@ -177,6 +178,7 @@ async def run_speed_test(
     且不发送 temperature（Anthropic 4.7+ 模型已移除该参数，省略最稳妥）。
     max_tokens 为 None 时不发送该字段，由上游用自身默认上限。
     temperature 为 None 时不发送该字段（部分模型仅允许默认值 1）。
+    timeout 为 None 时用默认 120s；巡检慢模型（冷启动推理）可调大。
     """
     base = normalize_base_url(base_url)
     if protocol == "anthropic":
@@ -238,7 +240,7 @@ async def run_speed_test(
             first_content_token = True
             content_parts: list[str] = []
 
-            async with httpx.AsyncClient(timeout=120.0, **net_client_kwargs()) as client:
+            async with httpx.AsyncClient(timeout=timeout or 120.0, **net_client_kwargs()) as client:
                 async with client.stream("POST", url, json=payload, headers=headers) as resp:
                     await _raise_for_openai_error(resp)
                     async for line in resp.aiter_lines():
@@ -305,7 +307,7 @@ async def run_speed_test(
             response_content = "".join(content_parts) or None
             total_latency_ms = (time.perf_counter() - start) * 1000
         else:
-            async with httpx.AsyncClient(timeout=120.0, **net_client_kwargs()) as client:
+            async with httpx.AsyncClient(timeout=timeout or 120.0, **net_client_kwargs()) as client:
                 resp = await client.post(url, json=payload, headers=headers)
                 await _raise_for_openai_error(resp)
                 data = resp.json()
@@ -406,6 +408,7 @@ async def execute_batch_tests(
     max_rpm: int = -1,
     on_progress: Callable[[dict], Awaitable[None]] | None = None,
     sink: Callable[[dict], Awaitable[None]] | None = None,
+    timeout: float | None = None,
 ) -> list[dict]:
     """批量执行测速。batch 端点与定时调度器、巡检 runner 共用。
 
@@ -448,6 +451,7 @@ async def execute_batch_tests(
                     provider_id=item.get("provider_id", ""),
                     provider_name=item.get("provider_name", ""),
                     protocol=item.get("protocol", "openai"),
+                    timeout=timeout,
                 )
             except Exception as e:
                 return _batch_error_result(e, item, prompt, max_tokens, temperature)

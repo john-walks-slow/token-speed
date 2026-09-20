@@ -35,6 +35,7 @@ class PatrolConfig:
     concurrency: int = 1
     iterations: int = 1
     max_rpm: int = -1
+    timeout: float | None = None
     targets: list[PatrolTarget] = field(default_factory=list)
 
     def to_tests(self) -> list[dict]:
@@ -85,5 +86,6 @@ def load_patrol_config(path: str) -> PatrolConfig:
         concurrency=raw.get("concurrency", 1),
         iterations=raw.get("iterations", 1),
         max_rpm=raw.get("max_rpm", -1),
+        timeout=raw.get("timeout"),
         targets=targets,
     )

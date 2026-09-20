@@ -6,6 +6,7 @@
   "concurrency": 1,
   "iterations": 1,
   "max_rpm": 20,
+  "timeout": 300,
   "targets": [
     {
       "provider_name": "Groq",
