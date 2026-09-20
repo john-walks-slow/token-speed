@@ -23,6 +23,8 @@ class PatrolTarget:
     models: list[str] = field(default_factory=list)
     # 动态发现：true 时从 {base_url}/models 拉上游全量列表，与显式 models 并集
     discover: bool = False
+    # 覆盖发现端点（默认 {base_url}/models）；用于列表路由不在 OpenAI 兼容路径下的 provider
+    discover_url: str = ""
     # 白/黑名单均为 regex，作用于并集：先 whitelist 匹配保留（空 = 全保留），
     # 再 blacklist 剔除匹配项，剩下的为最终模型集
     whitelist: list[str] = field(default_factory=list)
@@ -96,6 +98,7 @@ def load_patrol_config(path: str) -> PatrolConfig:
             protocol=t.get("protocol", "openai"),
             models=t.get("models", []),
             discover=t.get("discover", False),
+            discover_url=t.get("discover_url", ""),
             whitelist=t.get("whitelist", []),
             blacklist=t.get("blacklist", []),
         )

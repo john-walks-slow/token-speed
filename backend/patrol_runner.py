@@ -29,14 +29,19 @@ DEFAULT_DATA_DIR = os.path.join(
 )
 
 
-async def discover_models(base_url: str, api_key: str, timeout: float) -> list[str]:
-    """从 {base_url}/models 拉上游全量模型 id；失败返回空列表（退回显式 models）。"""
-    url = base_url.rstrip("/") + "/models"
+async def discover_models(base_url: str, api_key: str, timeout: float, discover_url: str = "") -> list[str]:
+    """从发现端点拉上游全量模型 id；失败返回空列表（退回显式 models）。
+
+    兼容两种响应形状：OpenAI `{data: [{id}]}` 与 Cloudflare `{result: [{name}]}`。
+    """
+    url = (discover_url or base_url.rstrip("/") + "/models").rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=timeout, headers={"Authorization": f"Bearer {api_key}"}) as client:
             resp = await client.get(url)
             resp.raise_for_status()
-            return [m["id"] for m in resp.json().get("data", []) if m.get("id")]
+            body = resp.json()
+        items = body.get("data") or body.get("result") or []
+        return [m.get("id") or m.get("name") for m in items if m.get("id") or m.get("name")]
     except Exception as e:
         print(f"patrol: discover {base_url} failed: {e}", file=sys.stderr)
         return []
@@ -54,7 +59,7 @@ async def run_patrol(config_path: str, data_dir: str = DEFAULT_DATA_DIR) -> str:
     discovered: dict[str, list[str]] = {}
     for t in cfg.targets:
         if t.discover:
-            discovered[t.provider_name] = await discover_models(t.base_url, t.resolve_api_key(), timeout)
+            discovered[t.provider_name] = await discover_models(t.base_url, t.resolve_api_key(), timeout, t.discover_url)
             if discovered[t.provider_name]:
                 print(f"patrol: discover {t.provider_name}: {len(discovered[t.provider_name])} models", file=sys.stderr)
 

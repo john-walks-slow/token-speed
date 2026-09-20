@@ -79,6 +79,7 @@
       "api_key_env": "CLOUDFLARE_API_KEY",
       "protocol": "openai",
       "discover": true,
+      "discover_url": "https://api.cloudflare.com/client/v4/accounts/5b393025ed97484019c46b8136af3aa5/ai/models/search?task=Text%20Generation&per_page=100",
       "models": [],
       "whitelist": ["@cf/.*"],
       "blacklist": [
@@ -123,6 +124,7 @@
       "api_key_env": "KILO_API_KEY",
       "protocol": "openai",
       "discover": true,
+      "discover_url": "https://api.kilo.ai/api/gateway/models",
       "models": [],
       "whitelist": [".*:free"],
       "blacklist": [
