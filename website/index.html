@@ -575,6 +575,9 @@ function drawSparks() {
     const last = pts[pts.length - 1];
     ctx.fillStyle = color;
     ctx.beginPath(); ctx.arc(last.x, last.y, 2, 0, Math.PI * 2); ctx.fill();
+    // 悬停提示：窗口内各点值
+    cv.title = `${METRIC_LABELS[activeMetric]} · 最近24h\n` +
+      series.map(d => `${formatTime(d.time)}  ${formatMetricValue(d.value)}`).join('\n');
   });
 }
 
@@ -592,6 +595,7 @@ function initChart() {
   chartCtx = chartCanvas.getContext('2d');
   resizeChart();
   window.addEventListener('resize', resizeChart);
+  bindChartHover();
 }
 
 function resizeChart() {
