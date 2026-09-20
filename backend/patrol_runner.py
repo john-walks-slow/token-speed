@@ -68,7 +68,8 @@ async def run_patrol(config_path: str, data_dir: str = DEFAULT_DATA_DIR,
     discovered: dict[str, list[str]] = {}
     for t in cfg.targets:
         if t.discover:
-            discovered[t.provider_name] = await discover_models(t.base_url, t.resolve_api_key(), timeout, t.discover_url)
+            discovered[t.provider_name] = await discover_models(
+                t.resolve_base_url(), t.resolve_api_key(), timeout, t.discover_url)
             if discovered[t.provider_name]:
                 after = len(t.filter_models(discovered[t.provider_name]))
                 print(f"patrol: discover {t.provider_name}: {len(discovered[t.provider_name])} models, {after} after filter", file=sys.stderr)
@@ -109,6 +110,22 @@ async def run_patrol(config_path: str, data_dir: str = DEFAULT_DATA_DIR,
     day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     out_path = os.path.join(data_dir, f"{day}.jsonl")
 
+    # 私有端点（base_url 引用环境变量）不落盘：结果中以占位符替代真实 URL。
+    # error_message 里 httpx 异常可能带完整请求 URL，一并替换。
+    private_map = {t.resolve_base_url(): "(private)" for t in cfg.targets if t.is_private}
+
+    def scrub(r: dict) -> None:
+        url = r.get("base_url")
+        if url in private_map:
+            r["base_url"] = private_map[url]
+            if r.get("error_message"):
+                r["error_message"] = r["error_message"].replace(url, private_map[url])
+
+    for r in collected:
+        scrub(r)
+    for r in results:
+        scrub(r)
+
     run_record = {
         "run_id": run_id,
         "started_at": run_started,
@@ -127,7 +144,20 @@ async def run_patrol(config_path: str, data_dir: str = DEFAULT_DATA_DIR,
     return out_path
 
 
+def apply_extra_env(raw: str) -> None:
+    """解析多行 KEY=VALUE 注入环境变量（GH secret PATROL_EXTRA_ENV）。
+
+    setdefault 使真实环境变量优先，本地调试可直接覆盖。
+    """
+    for line in raw.splitlines():
+        line = line.strip()
+        if "=" in line:
+            k, _, v = line.partition("=")
+            os.environ.setdefault(k.strip(), v.strip())
+
+
 def main() -> None:
+    apply_extra_env(os.environ.get("PATROL_EXTRA_ENV", ""))
     config_path = os.environ.get("PATROL_CONFIG", "config/patrol.json")
     data_dir = os.environ.get("PATROL_DATA_DIR", DEFAULT_DATA_DIR)
     raw = os.environ.get("PATROL_PROVIDERS", "").strip()

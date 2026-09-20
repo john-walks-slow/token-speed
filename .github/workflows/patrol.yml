@@ -36,6 +36,8 @@ jobs:
           CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           MODELSCOPE_API_KEY: ${{ secrets.MODELSCOPE_API_KEY }}
+          # 通用注入：多行 KEY=VALUE，私有端点 URL / key 均可走这里，无需改 workflow
+          PATROL_EXTRA_ENV: ${{ secrets.PATROL_EXTRA_ENV }}
           PATROL_PROVIDERS: ${{ inputs.providers || '' }}
         run: python -m backend.patrol_runner
 

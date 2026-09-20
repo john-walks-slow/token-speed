@@ -1,4 +1,5 @@
 {
+  "_comment": "base_url 支持 \"$ENV_NAME\" / \"${ENV_NAME}\" 引用环境变量（配合 Secret PATROL_EXTRA_ENV 注入多行 KEY=VALUE）：私有端点不落盘，公开结果 JSONL 中以 \"(private)\" 占位。API key 永远只写环境变量名（api_key_env），明文经 Secret 注入。",
   "prompt": "Hello, tell me a short story in 3 sentences.",
   "max_tokens": 256,
   "temperature": null,

@@ -34,6 +34,23 @@ class PatrolTarget:
         """从环境变量读取密钥；缺失返回空串（core 层会用空串发起请求，失败兜底）。"""
         return os.environ.get(self.api_key_env, "")
 
+    def resolve_base_url(self) -> str:
+        """base_url 支持 "$ENV_NAME" / "${ENV_NAME}" 形式引用环境变量（私有端点不落盘）。
+
+        普通 URL 原样返回；环境变量缺失返回空串（请求失败兜底，与 key 缺失一致）。
+        """
+        url = self.base_url
+        if url.startswith("${") and url.endswith("}"):
+            return os.environ.get(url[2:-1], "")
+        if url.startswith("$"):
+            return os.environ.get(url[1:], "")
+        return url
+
+    @property
+    def is_private(self) -> bool:
+        """base_url 引用环境变量即为私有端点，公开结果中以占位符替代。"""
+        return self.base_url.startswith("$")
+
     def filter_models(self, candidates: list[str]) -> list[str]:
         """合并显式 models 与候选（发现列表），过 whitelist → blacklist 得最终集。"""
         merged = list(dict.fromkeys(self.models + candidates))
@@ -68,10 +85,11 @@ class PatrolConfig:
         tests: list[dict] = []
         for t in self.targets:
             api_key = t.resolve_api_key()
+            base_url = t.resolve_base_url()
             for m in t.filter_models(discovered.get(t.provider_name, [])):
                 tests.append({
                     "model": m,
-                    "base_url": t.base_url,
+                    "base_url": base_url,
                     "api_key": api_key,
                     "provider_id": "",  # 巡检无 SQLite provider 实体
                     "provider_name": t.provider_name,

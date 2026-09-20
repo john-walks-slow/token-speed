@@ -60,6 +60,85 @@ def test_resolve_api_key_missing_returns_empty(monkeypatch):
     assert t.resolve_api_key() == ""
 
 
+def test_resolve_base_url_from_env(monkeypatch):
+    """base_url 支持 $ENV / ${ENV} 引用环境变量；缺失返回空串；普通 URL 原样。"""
+    monkeypatch.setenv("MY_URL", "https://private.example.com/v1")
+    t = PatrolTarget(provider_name="P", base_url="$MY_URL", api_key_env="K")
+    assert t.resolve_base_url() == "https://private.example.com/v1"
+    assert t.is_private is True
+
+    t2 = PatrolTarget(provider_name="P", base_url="${MY_URL}", api_key_env="K")
+    assert t2.resolve_base_url() == "https://private.example.com/v1"
+
+    monkeypatch.delenv("NO_SUCH_URL", raising=False)
+    t3 = PatrolTarget(provider_name="P", base_url="$NO_SUCH_URL", api_key_env="K")
+    assert t3.resolve_base_url() == ""
+
+    t4 = PatrolTarget(provider_name="P", base_url="https://api.p1.com/v1", api_key_env="K")
+    assert t4.resolve_base_url() == "https://api.p1.com/v1"
+    assert t4.is_private is False
+
+
+def test_private_url_placeholder(monkeypatch, tmp_path):
+    """私有 target 的结果 JSONL 中 base_url 替换为 (private)，公有原样保留。"""
+    import asyncio
+
+    async def fake_execute(tests, prompt, max_tokens, temperature, stream,
+                           concurrency, iterations, max_rpm=-1,
+                           on_progress=None, sink=None, timeout=None):
+        results = [{
+            "id": f"r{i}", "base_url": t["base_url"], "model": t["model"],
+            "provider_name": t["provider_name"], "success": False,
+            "error_message": f"ConnectError: request to {t['base_url']} failed",
+            "tps": None, "created_at": "2026-09-20T10:00:00+00:00",
+        } for i, t in enumerate(tests)]
+        if sink:
+            for r in results:
+                await sink(r)
+        return results
+
+    monkeypatch.setattr("backend.patrol_runner.execute_batch_tests", fake_execute)
+
+    cfg = {
+        "targets": [
+            {"provider_name": "Priv", "base_url": "$MY_URL",
+             "api_key_env": "TEST_KEY", "protocol": "openai", "models": ["m1"]},
+            {"provider_name": "Pub", "base_url": "https://api.pub.com/v1",
+             "api_key_env": "TEST_KEY", "protocol": "openai", "models": ["m2"]},
+        ]
+    }
+    cfg_path = tmp_path / "patrol.json"
+    cfg_path.write_text(json.dumps(cfg))
+    monkeypatch.setenv("TEST_KEY", "sk-fake")
+    monkeypatch.setenv("MY_URL", "https://private.example.com/v1")
+
+    from .patrol_runner import run_patrol
+    out = asyncio.run(run_patrol(str(cfg_path), str(tmp_path / "data")))
+    with open(out) as f:
+        data = json.loads(f.readline())
+    urls = {r["provider_name"]: r["base_url"] for r in data["results"]}
+    assert urls["Priv"] == "(private)"
+    assert urls["Pub"] == "https://api.pub.com/v1"
+    # error_message 中私有 URL 一并脱敏，公有不受影响
+    errs = {r["provider_name"]: r["error_message"] for r in data["results"]}
+    assert "https://private.example.com" not in errs["Priv"]
+    assert errs["Priv"] == "ConnectError: request to (private) failed"
+    assert errs["Pub"] == "ConnectError: request to https://api.pub.com/v1 failed"
+
+
+def test_extra_env_parsing(monkeypatch):
+    """PATROL_EXTRA_ENV 多行 KEY=VALUE 注入环境；已有变量不被覆盖。"""
+    from .patrol_runner import apply_extra_env
+
+    monkeypatch.setenv("EXISTING", "original")
+    monkeypatch.delenv("EXTRA_A", raising=False)
+    monkeypatch.delenv("EXTRA_B", raising=False)
+    apply_extra_env("EXTRA_A=1\n  EXTRA_B = v2 \nEXISTING=overridden\nno-equals-line")
+    assert os.environ["EXTRA_A"] == "1"
+    assert os.environ["EXTRA_B"] == "v2"
+    assert os.environ["EXISTING"] == "original"
+
+
 def test_patrol_runner_writes_jsonl(monkeypatch, tmp_path):
     """patrol_runner 用 mock execute_batch_tests 验证 JSONL 产出。"""
     import asyncio
