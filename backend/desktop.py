@@ -163,7 +163,8 @@ def launch(app, start_hidden: bool = False, admin_password: str | None = None) -
     threading.Thread(target=_tray_run, daemon=True).start()
 
     # 主线程运行 GUI 事件循环；窗口全部关闭后返回
-    webview.start()
+    icon_path = _icon_path()
+    webview.start(icon=icon_path or None)
 
     # 优雅关闭 uvicorn（触发 lifespan.scheduler.stop）
     server = server_holder.get("server")

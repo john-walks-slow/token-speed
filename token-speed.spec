@@ -21,6 +21,7 @@ a = Analysis(
     binaries=[],
     datas=[
         (frontend_dist, "frontend_dist"),
+        *([(os.path.join(root, "icon.ico"), ".")] if os.path.isfile(os.path.join(root, "icon.ico")) else []),
     ],
     hiddenimports=collect_submodules("uvicorn")
     + collect_submodules("fastapi")

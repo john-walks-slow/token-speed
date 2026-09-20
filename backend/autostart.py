@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+# Task Manager / 设置里「禁用启动项」时 Run 值不删，改在此键写禁用标记（首字节 0x03/0x07）
+APPROVED_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
 VALUE_NAME = "TokenSpeed"
 
 
@@ -21,6 +23,18 @@ def _launch_command() -> str:
     return f'"{exe}" --hidden'
 
 
+def _disabled_by_user() -> bool:
+    """启动项是否被 Task Manager 禁用。"""
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, APPROVED_KEY) as key:
+            data, _ = winreg.QueryValueEx(key, VALUE_NAME)
+        return bool(data) and data[0] in (3, 7)
+    except OSError:
+        return False
+
+
 def is_enabled() -> bool:
     if not supported():
         return False
@@ -29,9 +43,10 @@ def is_enabled() -> bool:
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
             value, _ = winreg.QueryValueEx(key, VALUE_NAME)
-        return value == _launch_command()
     except FileNotFoundError:
         return False
+    # 路径不区分大小写，归一后再比（用户手动改过 regedit 大小写时不误报）
+    return value.replace('"', "").lower() == str(Path(sys.executable).resolve()).lower() and not _disabled_by_user()
 
 
 def set_enabled(enabled: bool) -> bool:
