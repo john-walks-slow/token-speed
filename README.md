@@ -1,6 +1,6 @@
 # Token Speed
 
-LLM API 延迟与速度检测工具。核心价值是**测速指标口径正确**——TTFT / TPS / 思考时长 / token 拆分，兼容不同网关的 usage 统计口径（OpenAI 含 reasoning vs Gemini 系不含），不为口径差异付代价。
+适合个人使用的 LLM API 延迟与速度检测工具。监控多提供商的 TTFT / TPS / 思考时长 / token 拆分。
 
 **一个仓库，两种部署：**
 
