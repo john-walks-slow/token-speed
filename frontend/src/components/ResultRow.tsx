@@ -34,7 +34,7 @@ export default function ResultRow({ result: r, providers }: Props) {
             <ResponseContentView content={r.response_content} />
             <span>{r.total_latency_ms}ms</span>
             <span>TTFT {r.ttft_ms !== null ? `${r.ttft_ms}ms` : "N/A"}</span>
-            {r.itl_ms !== null && (
+            {r.itl_ms != null && (
               <span title="ITL = 首字后平均每 token 耗时（扣除排队/思考等待）">
                 ITL {r.itl_ms < 10 ? r.itl_ms.toFixed(1) : Math.round(r.itl_ms)}ms
               </span>

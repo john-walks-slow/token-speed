@@ -364,7 +364,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
     const total = filteredTests.length;
     if (total === 0) return null;
     const tpsVals = success.filter(t => t.tps !== null).map(t => t.tps as number);
-    const netTpsVals = success.filter(t => t.itl_ms !== null).map(t => t.itl_ms as number);
+    const netTpsVals = success.filter(t => t.itl_ms != null).map(t => t.itl_ms as number);
     const inputSum = success.reduce((acc, t) => acc + (t.input_tokens ?? 0), 0);
     const outputSum = success.reduce((acc, t) => acc + t.tokens_generated, 0);
     return {

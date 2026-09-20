@@ -132,7 +132,7 @@ export default function HistoryList({ refreshKey, providers, readOnly = false }:
                     <span title="有效速度 = 产出 token / 请求总耗时（含思考和等待）">
                       {t.tps !== null ? `${t.tps} tok/s` : "N/A"}
                     </span>
-                    {t.itl_ms !== null && (
+                    {t.itl_ms != null && (
                       <span title="ITL = 首字后平均每 token 耗时（扣除排队/思考等待）">
                         ITL {t.itl_ms < 10 ? t.itl_ms.toFixed(1) : Math.round(t.itl_ms)}ms
                       </span>
