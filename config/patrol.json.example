@@ -12,7 +12,7 @@
       "base_url": "https://api.groq.com/openai/v1",
       "api_key_env": "GROQ_API_KEY",
       "protocol": "openai",
-      "models": ["llama-3.3-70b-versatile", "openai/gpt-oss-120b"]
+      "models": ["qwen/qwen3.6-27b", "openai/gpt-oss-120b"]
     },
     {
       "provider_name": "NVIDIA NIM",
