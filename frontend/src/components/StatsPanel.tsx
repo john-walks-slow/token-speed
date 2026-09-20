@@ -30,7 +30,7 @@ import {
   LabelList,
 } from "recharts";
 
-type Metric = "tps" | "total_latency_ms" | "ttft_ms" | "success_rate";
+type Metric = "tps" | "net_tps" | "total_latency_ms" | "ttft_ms" | "success_rate";
 
 /** 柱状图轴 tick：长文本按可用宽度省略号截断（用双点 ‥），避免重叠；hover 显示全文。
  *
@@ -81,6 +81,7 @@ function ElidedTick({
 
 const METRIC_LABELS: Record<Metric, string> = {
   tps: "有效速度(tok/s)",
+  net_tps: "净 TPS(tok/s)",
   total_latency_ms: "延迟(ms)",
   ttft_ms: "TTFT(ms)",
   success_rate: "成功率",
@@ -121,10 +122,11 @@ function formatTokenCount(n: number): string {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
-/** 统计取值：tps 指标下失败样本计 0（而非忽略），体现失败惩罚；
- * 其余指标（延迟/TTFT）失败样本返回 null（跳过）。成功样本该指标为 null 也不计入。 */
+/** 统计取值：速度类指标（tps/net_tps）失败样本计 0（而非忽略），体现失败惩罚；
+ * 其余指标（延迟/TTFT）失败样本返回 null（跳过）。成功样本该指标为 null 也不计入
+ * （净 TPS 仅流式样本有值，非流式自动跳过）。 */
 function metricValue(t: TestHistory, metric: Exclude<Metric, "success_rate">): number | null {
-  if (!t.success) return metric === "tps" ? 0 : null;
+  if (!t.success) return metric === "tps" || metric === "net_tps" ? 0 : null;
   const v = t[metric];
   return typeof v === "number" ? v : null;
 }
@@ -357,12 +359,14 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
     const total = filteredTests.length;
     if (total === 0) return null;
     const tpsVals = success.filter(t => t.tps !== null).map(t => t.tps as number);
+    const netTpsVals = success.filter(t => t.net_tps !== null).map(t => t.net_tps as number);
     const inputSum = success.reduce((acc, t) => acc + (t.input_tokens ?? 0), 0);
     const outputSum = success.reduce((acc, t) => acc + t.tokens_generated, 0);
     return {
       total,
       successRate: total > 0 ? Math.round((success.length / total) * 100) : 0,
       avgTps: tpsVals.length > 0 ? median(tpsVals) : null,
+      avgNetTps: netTpsVals.length > 0 ? median(netTpsVals) : null,
       avgLatency: success.length > 0 ? median(success.map(t => t.total_latency_ms)) : 0,
       tokensIn: inputSum,
       tokensOut: outputSum,
@@ -643,6 +647,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
           <MetricCard
             label="中位有效速度"
             value={cardStats.avgTps !== null ? Math.round(cardStats.avgTps * 100) / 100 : "N/A"}
+            sub={cardStats.avgNetTps !== null ? `净 TPS ${Math.round(cardStats.avgNetTps * 100) / 100}` : undefined}
           />
           <MetricCard label="中位延迟" value={`${Math.round(cardStats.avgLatency)}ms`} />
           <MetricCard

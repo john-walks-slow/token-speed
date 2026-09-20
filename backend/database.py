@@ -96,6 +96,7 @@ def _get_conn():
             "reasoning_tokens INTEGER DEFAULT 0",
             "content_tokens INTEGER DEFAULT 0",
             "thinking_ms REAL",
+            "net_tps REAL",
             "input_tokens INTEGER",
             "schedule_id TEXT",
             "provider_id TEXT",
@@ -185,10 +186,10 @@ async def insert_speed_test(result: dict, schedule_id: str | None = None) -> Non
         """INSERT INTO speed_tests
            (id, base_url, model, actual_model, prompt, max_tokens, temperature,
             ttft_ms, content_ttft_ms, total_latency_ms, tokens_generated,
-            reasoning_tokens, content_tokens, thinking_ms, tps,
+            reasoning_tokens, content_tokens, thinking_ms, tps, net_tps,
             success, error_message, created_at, schedule_id,
             provider_id, provider_name, response_content, input_tokens)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             result["id"],
             result["base_url"],
@@ -205,6 +206,7 @@ async def insert_speed_test(result: dict, schedule_id: str | None = None) -> Non
             result.get("content_tokens", 0),
             result.get("thinking_ms"),
             result.get("tps"),
+            result.get("net_tps"),
             1 if result["success"] else 0,
             result.get("error_message"),
             result.get("created_at"),

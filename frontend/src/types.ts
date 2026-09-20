@@ -29,6 +29,7 @@ export interface SpeedTestResult {
   content_tokens: number;
   thinking_ms: number | null;
   tps: number | null;
+  net_tps: number | null;
   success: boolean;
   error_message: string | null;
   created_at: string;
@@ -60,6 +61,7 @@ export interface TestHistory {
   input_tokens?: number | null;
   thinking_ms: number | null;
   tps: number | null;
+  net_tps: number | null;
   success: boolean;
   error_message?: string | null;
   created_at: string;

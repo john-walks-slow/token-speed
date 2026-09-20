@@ -3,7 +3,12 @@ import sqlite3
 
 import pytest
 
-from backend.speed_test import _extract_reasoning_tokens, _reconcile_token_counts
+from backend.speed_test import (
+    _extract_reasoning_tokens,
+    _reconcile_token_counts,
+    _compute_net_tps,
+    run_speed_test,
+)
 from backend.database import _backfill_tps
 from backend.main import compute_summary, _median
 from backend.models import SpeedTestResult
@@ -106,6 +111,111 @@ class TestBackfillTps:
         _backfill_tps(conn)
         row = conn.execute("SELECT tps FROM speed_tests WHERE id='l'").fetchone()
         assert row["tps"] == 999
+
+
+class TestNetTps:
+    """净 TPS 口径：content_tokens / (总耗时 - content_ttft)，仅流式可测。"""
+
+    def test_formula(self):
+        # 100 token 正文，首字 2s，总耗时 5s → 发射耗时 3s → 净速 ≈ 33.33
+        assert round(_compute_net_tps(100, 2000.0, 5000.0), 2) == 33.33
+
+    def test_non_stream_no_content_ttft(self):
+        assert _compute_net_tps(100, None, 5000.0) is None
+
+    def test_no_content_tokens(self):
+        # 纯思考无正文（content=0）：无发射可言
+        assert _compute_net_tps(0, 2000.0, 5000.0) is None
+
+    def test_degenerate_latency(self):
+        # 总耗时 <= content_ttft（时钟毛刺）：不可测，不产生负值
+        assert _compute_net_tps(100, 5000.0, 5000.0) is None
+        assert _compute_net_tps(100, 5001.0, 5000.0) is None
+
+    def test_stream_result_carries_net_tps(self):
+        # 走真实代码路径：伪 SSE 流，验证返回结构含 net_tps 且与公式一致
+        import asyncio
+
+        class FakeResp:
+            status_code = 200
+            async def aread(self):
+                return b""
+            def raise_for_status(self):
+                pass
+            async def aiter_lines(self):
+                yield 'data: {"choices":[{"delta":{"content":"Hi"}}]}'
+                yield 'data: {"choices":[{"delta":{"content":" there"}}],"usage":{"completion_tokens":10,"prompt_tokens":5}}'
+                yield "data: [DONE]"
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *a):
+                return False
+
+        class FakeClient:
+            def __init__(self, *a, **kw):
+                pass
+            def stream(self, *a, **kw):
+                return FakeResp()
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *a):
+                return False
+
+        import backend.speed_test as st
+
+        async def go():
+            orig = st.httpx.AsyncClient
+            st.httpx.AsyncClient = FakeClient
+            try:
+                return await run_speed_test("http://x", model="m", stream=True)
+            finally:
+                st.httpx.AsyncClient = orig
+
+        r = asyncio.run(go())
+        # mock 流亚毫秒级完成，2 位小数圆整后重套公式误差被放大，
+        # 故只断言代码路径确实产出正的 net_tps（公式正确性由纯函数用例覆盖）
+        assert r["net_tps"] is not None and r["net_tps"] > 0
+
+    def test_non_stream_net_tps_is_none(self):
+        import asyncio
+
+        class FakeResp:
+            status_code = 200
+            async def aread(self):
+                return b""
+            def raise_for_status(self):
+                pass
+            def json(self):
+                return {"model": "m", "choices": [{"message": {"content": "hi"}}],
+                        "usage": {"completion_tokens": 5, "prompt_tokens": 2}}
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *a):
+                return False
+
+        class FakeClient:
+            def __init__(self, *a, **kw):
+                pass
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *a):
+                return False
+            async def post(self, *a, **kw):
+                return FakeResp()
+
+        import backend.speed_test as st
+
+        async def go():
+            orig = st.httpx.AsyncClient
+            st.httpx.AsyncClient = FakeClient
+            try:
+                return await run_speed_test("http://x", model="m", stream=False)
+            finally:
+                st.httpx.AsyncClient = orig
+
+        r = asyncio.run(go())
+        assert r["net_tps"] is None  # 非流式无 content_ttft，净 TPS 不可测
+        assert r["tps"] is not None
 
 
 class TestMedian:

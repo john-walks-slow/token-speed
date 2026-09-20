@@ -71,6 +71,7 @@ class SpeedTestResult(BaseModel):
     input_tokens: Optional[int] = None
     thinking_ms: Optional[float] = None
     tps: Optional[float] = None
+    net_tps: Optional[float] = None
     success: bool
     error_message: Optional[str] = None
     created_at: str = ""
@@ -104,6 +105,7 @@ class SpeedTestHistory(BaseModel):
     input_tokens: Optional[int] = None
     thinking_ms: Optional[float] = None
     tps: Optional[float] = None
+    net_tps: Optional[float] = None
     success: bool
     error_message: Optional[str] = None
     created_at: str

@@ -132,6 +132,11 @@ export default function HistoryList({ refreshKey, providers, readOnly = false }:
                     <span title="有效速度 = 产出 token / 请求总耗时（含思考和等待）">
                       {t.tps !== null ? `${t.tps} tok/s` : "N/A"}
                     </span>
+                    {t.net_tps !== null && (
+                      <span title="净 TPS = 正文 token / 扣除首字前等待（排队/思考）后的发射耗时">
+                        净 {t.net_tps} tok/s
+                      </span>
+                    )}
                     {t.reasoning_tokens > 0 ? (
                       <span className="text-purple-400" title="reasoning / content tokens">
                         {t.reasoning_tokens}+{t.content_tokens}
