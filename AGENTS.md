@@ -13,10 +13,10 @@ LLM API 延迟与速度检测工具：多服务商管理、跨模型批量测速
 - `backend/database.py` — SQLite 访问 + schema 迁移（列追加式）
 - `backend/paths.py` — frozen(exe)/开发态路径区分
 - `backend/patrol_config.py` — 巡检配置数据结构（PatrolConfig，core 层契约，同构不同源）
-- `backend/patrol_runner.py` — GH Actions 巡检入口（`python -m backend.patrol_runner`），产 JSONL 到 `website/patrol/data/`
+- `backend/patrol_runner.py` — GH Actions 巡检入口（`python -m backend.patrol_runner`），产 JSONL 到 `website/data/`
 - `frontend/src/App.tsx` — 布局 + 状态编排；`components/` 各面板
 - `frontend/src/components/StatsPanel.tsx` — 统计聚合与图表（解析/输入双口径）
-- `website/patrol/` — 巡检看板（`index.html` 零构建，`data/` 存 JSONL 结果），GitHub Pages 唯一内容
+- `website/` — 巡检看板（`index.html` 零构建，`data/` 存 JSONL 结果），GitHub Pages 唯一内容
 - `config/patrol.json.example` — 巡检配置示例（fork 后改名 patrol.json + 填 Secrets）
 - `.github/workflows/deploy-website.yml` — Pages 部署（build_type=workflow）
 - `.github/workflows/patrol.yml` — 巡检 cron（每6h，13分错开整点）+ 结果 commit
@@ -52,4 +52,4 @@ python build.py --zip
 - `execute_batch_tests` 的数据落地由 sink callback 注入（逐条消费）。core 层不感知数据去向——本地 App 传 sqlite_sink，巡检 runner 传 json_sink。不要在 core 层加数据存储分支。
 - 两套数据独立不合并：本地 SQLite 与巡检 JSONL 不加 source 列、不合并视图，各看各的入口。
 - 前端改动后需 `npm run build` 才会反映到后端挂载的静态站。
-- 巡检看板（`website/patrol/`）是零构建纯 JS，原生 Canvas 图表；改代码后无需构建，push 即生效（deploy-website 自动发布）。
+- 巡检看板（`website/`）是零构建纯 JS，原生 Canvas 图表；改代码后无需构建，push 即生效（deploy-website 自动发布）。

@@ -46,14 +46,14 @@ Fork 仓库 → 配置 Secrets → 启用 workflow → 看板自动跑起来。�
 
 | Workflow | 作用 |
 |---|---|
-| **Token Speed Patrol** (`.github/workflows/patrol.yml`) | 每 6 小时测速一次，结果 commit 回 `website/patrol/data/` |
+| **Token Speed Patrol** (`.github/workflows/patrol.yml`) | 每 6 小时测速一次，结果 commit 回 `website/data/` |
 | **Deploy website** (`.github/workflows/deploy-website.yml`) | push master 自动发布 GitHub Pages |
 
 到 **Settings → Pages → Build and deployment → Source: GitHub Actions** 启用 Pages。
 
 ### 3. 触发首次巡逻
 
-**Actions → Token Speed Patrol → Run workflow** 手动触发一次，确认产出 `website/patrol/data/YYYY-MM-DD.jsonl`。之后看板地址（`https://<你的用户名>.github.io/token-speed/patrol/`）即开始展示趋势。
+**Actions → Token Speed Patrol → Run workflow** 手动触发一次，确认产出 `website/data/YYYY-MM-DD.jsonl`。之后看板地址（`https://<你的用户名>.github.io/token-speed/`）即开始展示趋势。
 
 ### 自定义巡逻目标
 
@@ -135,7 +135,7 @@ python build.py --zip   # 构建前端 + PyInstaller 打包 + 压缩
 - **测速内核**：`backend/speed_test.py` — httpx 流式/非流式，OpenAI/Anthropic 协议，`_reconcile_token_counts` 统一 usage 口径。`execute_batch_tests` 通过 sink callback 解耦数据落地。
 - **桌面版**：FastAPI + SQLite + httpx，asyncio 调度器，SSE 流式推送。
 - **前端**：React 19 + TypeScript + Vite + Tailwind v4 + Recharts，shadcn/ui 风格组件。
-- **巡逻看板**：`website/patrol/index.html` — 零构建纯 JS + 原生 Canvas 图表，与桌面版共享深色主题。
+- **巡逻看板**：`website/index.html` — 零构建纯 JS + 原生 Canvas 图表，与桌面版共享深色主题。
 
 ## 目录结构
 
@@ -151,8 +151,8 @@ config/
   patrol.json         # 巡逻配置（fork 后改这个 + 填 secrets）
   patrol.json.example # 配置示例
 website/
-  patrol/index.html   # 巡逻看板（零构建），GitHub Pages 唯一入口
-  patrol/data/        # 巡逻 JSONL 结果（workflow 自动 commit）
+  index.html          # 巡逻看板（零构建），GitHub Pages 唯一入口
+  data/               # 巡逻 JSONL 结果（workflow 自动 commit）
 .github/workflows/
   patrol.yml          # 巡逻 cron（每6h）+ 结果 commit
   deploy-website.yml  # GitHub Pages 部署

@@ -2,7 +2,7 @@
 
 `python -m backend.patrol_runner` —— 不依赖 FastAPI 事件循环，
 读 config/patrol.json → 组装 tests → execute_batch_tests(sink=json_sink)
-→ 写 JSON 到 website/patrol/data/。
+→ 写 JSON 到 website/data/。
 
 数据落地由 json_sink 注入（逐条收集，结束后一次性写文件）。core 层
 （speed_test.py）不感知数据去向，与本地 App 共用同一测速内核。
@@ -22,10 +22,10 @@ import httpx
 from .patrol_config import load_patrol_config
 from .speed_test import execute_batch_tests
 
-# 巡检结果目录：放 website/patrol/data/ 下，随 Pages 一起发布
+# 巡检结果目录：放 website/data/ 下，随 Pages 一起发布
 DEFAULT_DATA_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "website", "patrol", "data",
+    "website", "data",
 )
 
 
@@ -88,7 +88,7 @@ async def run_patrol(config_path: str, data_dir: str = DEFAULT_DATA_DIR) -> str:
     ok = sum(1 for r in results if r.get("success"))
     status = "success" if ok == len(results) else ("partial" if ok > 0 else "failed")
 
-    # 按天分文件：website/patrol/data/YYYY-MM-DD.jsonl
+    # 按天分文件：website/data/YYYY-MM-DD.jsonl
     # 每行一个 run 的完整结果数组，便于静态看板按天加载
     os.makedirs(data_dir, exist_ok=True)
     day = datetime.now(timezone.utc).strftime("%Y-%m-%d")

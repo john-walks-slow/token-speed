@@ -39,7 +39,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add website/patrol/data/
+          git add website/data/
           git commit -m "patrol: $(date -u +%Y-%m-%dT%H:%M:%SZ)" || echo "nothing to commit"
           # 巡检运行期间 master 可能有新提交（否则 push 被拒、数据丢失）：rebase 后重试
           for i in 1 2 3 4 5; do
