@@ -12,28 +12,37 @@
       "base_url": "https://api.groq.com/openai/v1",
       "api_key_env": "GROQ_API_KEY",
       "protocol": "openai",
-      "models": ["openai/gpt-oss-20b", "openai/gpt-oss-120b"]
+      "models": [
+        "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b"
+      ]
     },
     {
       "provider_name": "NVIDIA NIM",
       "base_url": "https://integrate.api.nvidia.com/v1",
       "api_key_env": "NVIDIA_API_KEY",
       "protocol": "openai",
-      "models": ["meta/llama-3.3-70b-instruct", "openai/gpt-oss-120b"]
+      "models": [
+        "openai/gpt-oss-20b"
+      ]
     },
     {
       "provider_name": "Google Gemini",
       "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
       "api_key_env": "GEMINI_API_KEY",
       "protocol": "openai",
-      "models": ["gemini-3.5-flash"]
+      "models": [
+        "gemini-3.5-flash"
+      ]
     },
     {
       "provider_name": "SambaNova",
       "base_url": "https://api.sambanova.ai/v1",
       "api_key_env": "SAMBANOVA_API_KEY",
       "protocol": "openai",
-      "models": ["Meta-Llama-3.3-70B-Instruct"]
+      "models": [
+        "Meta-Llama-3.3-70B-Instruct"
+      ]
     }
   ]
 }
