@@ -107,6 +107,11 @@ function groupModelOf(t: TestHistory, mode: GroupMode): string | null {
   return null;
 }
 
+/** ITL 展示：个位数保留一位小数，其余取整。 */
+function formatItl(v: number): string {
+  return v < 10 ? v.toFixed(1) : String(Math.round(v));
+}
+
 /** median(P50)：长尾分布下比 mean 稳定。 */
 function median(nums: number[]): number {
   if (nums.length === 0) return 0;
@@ -650,7 +655,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
           <MetricCard
             label="中位有效速度"
             value={cardStats.avgTps !== null ? Math.round(cardStats.avgTps * 100) / 100 : "N/A"}
-            sub={cardStats.avgNetTps !== null ? `ITL ${Math.round(cardStats.avgNetTps * 100) / 100}ms` : undefined}
+            sub={cardStats.avgNetTps !== null ? `ITL ${formatItl(cardStats.avgNetTps)}ms` : undefined}
           />
           <MetricCard label="中位延迟" value={`${Math.round(cardStats.avgLatency)}ms`} />
           <MetricCard

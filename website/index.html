@@ -143,8 +143,20 @@ section { margin-bottom: 40px; }
 .results-table .spark-cell canvas { display: block; }
 
 /* chart */
-.chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+.chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; position: relative; }
 .chart-card canvas { display: block; width: 100%; }
+.chart-tooltip {
+  position: absolute; pointer-events: none; z-index: 10; display: none;
+  background: rgba(14, 18, 22, 0.95); border: 1px solid var(--border-strong);
+  border-radius: 8px; padding: 8px 11px; font-size: 12px; line-height: 1.55;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.4); white-space: nowrap;
+}
+.chart-tooltip .t-time { color: var(--text-faint); font-family: var(--mono); font-size: 11px; }
+.chart-tooltip .t-row { display: flex; align-items: center; gap: 6px; }
+.chart-tooltip .t-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.chart-tooltip .t-model { color: var(--text); }
+.chart-tooltip .t-provider { color: var(--text-faint); font-size: 11px; }
+.chart-tooltip .t-val { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; margin-left: auto; padding-left: 10px; }
 .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
 .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
 .legend-item .swatch { width: 12px; height: 3px; border-radius: 2px; }
@@ -236,6 +248,7 @@ footer { border-top: 1px solid var(--border); padding: 32px 0; margin-top: 20px;
     </div>
     <div class="chart-card">
       <canvas id="trendChart" height="320"></canvas>
+      <div class="chart-tooltip" id="chartTooltip"></div>
       <div class="legend" id="legend"></div>
     </div>
   </section>
@@ -451,7 +464,7 @@ function renderMetrics(latestRun) {
     { label: '测试模型', value: Object.keys(points).length },
     { label: '成功率', value: `${successRate}%`, sub: `${successResults.length}/${total}` },
     { label: '中位 TPS', value: tpsVals.length ? median(tpsVals).toFixed(1) : 'N/A', sub: 'tok/s' },
-    { label: '中位 ITL', value: itlVals.length ? Math.round(median(itlVals)) + 'ms' : 'N/A', sub: 'ms/tok' },
+    { label: '中位 ITL', value: itlVals.length ? formatItl(median(itlVals)) + 'ms' : 'N/A', sub: 'ms/tok' },
     { label: '中位延迟', value: latencyVals.length ? Math.round(median(latencyVals)) + 'ms' : 'N/A' },
     { label: '中位 TTFT', value: ttftVals.length ? Math.round(median(ttftVals)) + 'ms' : 'N/A' },
   ];
@@ -507,7 +520,7 @@ function renderResults(latestRun) {
       ? '<span class="ok">✓</span>'
       : '<span class="fail">✗</span>';
     const tps = r.success && r.tps != null ? r.tps.toFixed(1) : '—';
-    const itl = r.success && r.itl_ms != null ? Math.round(r.itl_ms) + 'ms' : '—';
+    const itl = r.success && r.itl_ms != null ? formatItl(r.itl_ms) + 'ms' : '—';
     const ttft = r.success && r.ttft_ms != null ? Math.round(r.ttft_ms) + 'ms' : '—';
     const latency = r.success ? Math.round(r.total_latency_ms) + 'ms' : '—';
     const tokens = r.success ? `${r.tokens_generated}` : '—';
@@ -659,7 +672,8 @@ function drawChart() {
     ctx.fillText(formatTime(t), x, pad.t + ch + 8);
   }
 
-  // 平滑曲线
+  // 平滑曲线（缓存像素坐标供 hover 命中测试）
+  chartHits = [];
   visibleSeries.forEach((k, idx) => {
     const data = seriesByPair[k];
     const color = colorOf(k.split('|')[0]);
@@ -676,15 +690,91 @@ function drawChart() {
     pts.forEach(p => {
       ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill();
     });
+    const [provider, model] = k.split('|');
+    data.forEach((d, i) => chartHits.push({ x: pts[i].x, y: pts[i].y, time: d.time, value: d.value, provider, model, color }));
   });
 
   renderLegend(pairs, seriesByPair);
+}
+
+// 最近一次 drawChart 的可命中点（像素坐标）
+let chartHits = [];
+
+// hover：命中点放大高亮 + 竖参考线，tooltip 展示值
+function drawChartHighlight(hit) {
+  drawChart();
+  if (!hit || !chartCtx) return;
+  const ctx = chartCtx;
+  const pad = { l: 50, r: 16, t: 16, b: 36 };
+  const ch = 320 - pad.t - pad.b;
+  // 竖参考线
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(hit.x, pad.t); ctx.lineTo(hit.x, pad.t + ch); ctx.stroke();
+  ctx.setLineDash([]);
+  // 高亮点
+  ctx.fillStyle = hit.color;
+  ctx.beginPath(); ctx.arc(hit.x, hit.y, 4.5, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#0a0d10'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(hit.x, hit.y, 4.5, 0, Math.PI * 2); ctx.stroke();
+}
+
+// 趋势图 hover 交互：最近点命中（半径 12px）
+function bindChartHover() {
+  const tooltip = document.getElementById('chartTooltip');
+  let hovered = null;
+
+  chartCanvas.addEventListener('mousemove', e => {
+    const rect = chartCanvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    let best = null, bestDist = 12 * 12;
+    for (const h of chartHits) {
+      const d = (h.x - mx) ** 2 + (h.y - my) ** 2;
+      if (d < bestDist) { bestDist = d; best = h; }
+    }
+    if (best !== hovered) {
+      hovered = best;
+      drawChartHighlight(hovered);
+      if (!hovered) { tooltip.style.display = 'none'; return; }
+      tooltip.innerHTML = `<div class="t-time">${formatTime(hovered.time)}</div>
+        <div class="t-row">
+          <span class="t-dot" style="background:${hovered.color}"></span>
+          <span class="t-model">${escapeHtml(hovered.model)}</span>
+          <span class="t-provider">${escapeHtml(hovered.provider)}</span>
+          <span class="t-val">${formatMetricValue(hovered.value)}</span>
+        </div>`;
+    }
+    if (hovered) {
+      tooltip.style.display = 'block';
+      const card = chartCanvas.parentElement;
+      const maxLeft = card.clientWidth - tooltip.offsetWidth - 12;
+      const maxTop = card.clientHeight - tooltip.offsetHeight - 8;
+      tooltip.style.left = Math.max(12, Math.min(hovered.x + 20, maxLeft)) + 'px';
+      tooltip.style.top = Math.max(4, Math.min(hovered.y - 14, maxTop)) + 'px';
+    }
+  });
+  chartCanvas.addEventListener('mouseleave', () => {
+    hovered = null;
+    tooltip.style.display = 'none';
+    drawChart();
+  });
+}
+
+function formatMetricValue(v) {
+  if (activeMetric === 'success_rate') return v.toFixed(1) + '%';
+  if (activeMetric === 'tps') return v.toFixed(1) + ' tok/s';
+  if (activeMetric === 'itl_ms') return formatItl(v) + ' ms';
+  return Math.round(v) + ' ms';
 }
 
 function formatVal(v) {
   if (activeMetric === 'success_rate') return v.toFixed(0) + '%';
   if (activeMetric === 'tps') return v.toFixed(0);
   return Math.round(v);
+}
+
+// ITL 展示：个位数保留一位小数，其余取整
+function formatItl(v) {
+  return v < 10 ? v.toFixed(1) : Math.round(v).toString();
 }
 
 function formatTime(t) {

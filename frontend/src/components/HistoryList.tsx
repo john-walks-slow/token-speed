@@ -134,7 +134,7 @@ export default function HistoryList({ refreshKey, providers, readOnly = false }:
                     </span>
                     {t.itl_ms !== null && (
                       <span title="ITL = 首字后平均每 token 耗时（扣除排队/思考等待）">
-                        ITL {t.itl_ms}ms
+                        ITL {t.itl_ms < 10 ? t.itl_ms.toFixed(1) : Math.round(t.itl_ms)}ms
                       </span>
                     )}
                     {t.reasoning_tokens > 0 ? (
