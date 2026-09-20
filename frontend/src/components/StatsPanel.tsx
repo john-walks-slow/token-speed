@@ -449,6 +449,8 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
         value: Math.round(median(vals) * 100) / 100,
         count: vals.length,
       }))
+      // 值为 0（全失败样本计 0 / 无有效 token）的对不进图，避免零柱占位
+      .filter(d => d.value > 0)
       .sort((a, b) => b.value - a.value);
   }, [filteredTests, metric, isSuccessRate, labelForPair, keyFor]);
 
@@ -470,6 +472,7 @@ export default function StatsPanel({ refreshKey, providers }: Props) {
         success: d.success,
         rate: d.total > 0 ? Math.round((d.success / d.total) * 1000) / 10 : 0,
       }))
+      .filter(d => d.rate > 0) // 0% 成功率的对不进图，避免零柱占位
       .sort((a, b) => a.rate - b.rate);
   }, [filteredTests, labelForPair, keyFor]);
 
