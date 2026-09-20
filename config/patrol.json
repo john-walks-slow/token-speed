@@ -83,7 +83,7 @@
       "models": [],
       "whitelist": ["@cf/.*"],
       "blacklist": [
-        ".*(vision|guard|lora|fp8-fast)$|@cf/google/gemma-2b-it-lora|@cf/google/gemma-7b-it-lora|@cf/meta-llama/.*"
+        ".*(vision|guard|lora).*|@cf/meta-llama/.*"
       ]
     },
     {

@@ -32,7 +32,8 @@ DEFAULT_DATA_DIR = os.path.join(
 async def discover_models(base_url: str, api_key: str, timeout: float, discover_url: str = "") -> list[str]:
     """从发现端点拉上游全量模型 id；失败返回空列表（退回显式 models）。
 
-    兼容两种响应形状：OpenAI `{data: [{id}]}` 与 Cloudflare `{result: [{name}]}`。
+    兼容两种响应形状：OpenAI `{data: [{id}]}` 与 Cloudflare `{result: [{id: uuid, name}]}`。
+    CF 的 id 是内部 UUID，模型名在 name 字段，故 name 优先。
     """
     url = (discover_url or base_url.rstrip("/") + "/models").rstrip("/")
     try:
@@ -41,7 +42,7 @@ async def discover_models(base_url: str, api_key: str, timeout: float, discover_
             resp.raise_for_status()
             body = resp.json()
         items = body.get("data") or body.get("result") or []
-        return [m.get("id") or m.get("name") for m in items if m.get("id") or m.get("name")]
+        return [m.get("name") or m.get("id") for m in items if m.get("name") or m.get("id")]
     except Exception as e:
         print(f"patrol: discover {base_url} failed: {e}", file=sys.stderr)
         return []
