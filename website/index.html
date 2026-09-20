@@ -118,6 +118,7 @@ section { margin-bottom: 40px; }
 }
 .chip:hover { color: var(--text); border-color: var(--border-strong); }
 .chip.active { background: var(--green-soft); border-color: rgba(52,211,153,.4); color: var(--green); }
+.chip-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: -0.5px; }
 
 /* results table */
 .results-card {
@@ -138,6 +139,8 @@ section { margin-bottom: 40px; }
 .results-table .ok { color: var(--green); }
 .results-table .fail { color: var(--red); }
 .results-table .err-msg { font-size: 11px; color: var(--text-faint); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.results-table .spark-cell { padding: 5px 10px; }
+.results-table .spark-cell canvas { display: block; }
 
 /* chart */
 .chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
@@ -204,6 +207,12 @@ footer { border-top: 1px solid var(--border); padding: 32px 0; margin-top: 20px;
   <section>
     <div class="sec-head">
       <div class="sec-title"><span class="sec-kicker">/ Latest</span> 最近一次巡检</div>
+      <div class="filters" id="providerFilters">
+        <div class="filter-group">
+          <span class="filter-label">Provider</span>
+          <span id="providerChips" style="display:flex;flex-wrap:wrap;gap:6px"></span>
+        </div>
+      </div>
     </div>
     <div class="results-card" id="resultsCard">
       <div class="loading"><div class="spinner"></div>加载中…</div>
@@ -246,7 +255,7 @@ footer { border-top: 1px solid var(--border); padding: 32px 0; margin-top: 20px;
 <script>
 // ── 数据加载 ──────────────────────────────────────
 
-const CHART_COLORS = ['#34d399','#60a5fa','#fbbf24','#c084fc','#22d3ee','#facc15','#94a3b8','#fb7185'];
+const CHART_COLORS = ['#34d399','#60a5fa','#fbbf24','#c084fc','#22d3ee','#facc15','#94a3b8','#fb7185','#4ade80','#38bdf8','#f472b6','#a3e635','#fb923c','#818cf8','#2dd4bf','#e879f9'];
 const METRIC_LABELS = {
   tps: '有效速度 (tok/s)',
   itl_ms: 'ITL (ms/tok)',
@@ -254,10 +263,29 @@ const METRIC_LABELS = {
   total_latency_ms: '延迟 (ms)',
   success_rate: '成功率 (%)',
 };
+const SPARK_WINDOW_MS = 24 * 3600 * 1000;
 
 let allRuns = [];      // 按时间升序的 run 记录
 let activeMetric = 'tps';
 let activeKeys = new Set(); // 选中的 (provider|model) 对
+let activeProviders = new Set(); // 空 = 全选
+let providerColor = {}; // provider -> 颜色
+
+function providerOf(r) {
+  return r.provider_name || hostnameOf(r.base_url) || 'unknown';
+}
+
+function colorOf(provider) {
+  return providerColor[provider] || CHART_COLORS[Object.keys(providerColor).length % CHART_COLORS.length];
+}
+
+function assignProviderColors(runs) {
+  const providers = new Set();
+  for (const run of runs) for (const r of run.results) providers.add(providerOf(r));
+  for (const p of [...providers].sort()) {
+    if (!providerColor[p]) providerColor[p] = CHART_COLORS[Object.keys(providerColor).length % CHART_COLORS.length];
+  }
+}
 
 // 尝试加载 data/ 下所有 JSONL 文件
 async function loadAllData() {
@@ -306,8 +334,7 @@ async function discoverJsonlFiles() {
 // ── 数据处理（与 StatsPanel 逻辑对齐）──────────────
 
 function pairKey(r) {
-  const p = r.provider_name || hostnameOf(r.base_url) || 'unknown';
-  return `${p}|${r.model}`;
+  return `${providerOf(r)}|${r.model}`;
 }
 
 function hostnameOf(url) {
@@ -354,6 +381,45 @@ function runToPoints(run) {
 
 // ── 渲染 ──────────────────────────────────────────
 
+// provider chip 筛选（空 activeProviders = 全选）
+function providerVisible(provider) {
+  return activeProviders.size === 0 || activeProviders.has(provider);
+}
+
+function renderProviderChips() {
+  const providers = Object.keys(providerColor);
+  const el = document.getElementById('providerChips');
+  if (providers.length < 2) { el.closest('.filters').style.display = 'none'; return; }
+  const counts = {};
+  for (const r of allRuns[allRuns.length - 1].results) counts[providerOf(r)] = (counts[providerOf(r)] || 0) + 1;
+  el.innerHTML = providers.map(p => {
+    const active = activeProviders.size === 0 || activeProviders.has(p);
+    return `<button class="chip${active ? ' active' : ''}" data-provider="${escapeHtml(p)}">
+      <span class="chip-dot" style="background:${colorOf(p)}"></span>${escapeHtml(p)} <span style="opacity:.6">${counts[p] || 0}</span>
+    </button>`;
+  }).join('');
+  el.querySelectorAll('.chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const p = btn.dataset.provider;
+      if (activeProviders.size === 0) {
+        // 从全选切到单选
+        activeProviders = new Set([p]);
+      } else if (activeProviders.has(p) && activeProviders.size === 1) {
+        activeProviders.clear(); // 唯一选中项再点 = 恢复全选
+      } else if (activeProviders.has(p)) {
+        activeProviders.delete(p);
+        if (activeProviders.size === 0) activeProviders.clear();
+      } else {
+        activeProviders.add(p);
+      }
+      const latest = allRuns[allRuns.length - 1];
+      renderProviderChips();
+      renderResults(latest);
+      drawChart();
+    });
+  });
+}
+
 function renderNavStatus(latestRun) {
   const el = document.getElementById('navStatus');
   if (!latestRun) { el.innerHTML = '<span class="dot err"></span><span>暂无数据</span>'; return; }
@@ -394,20 +460,49 @@ function renderMetrics(latestRun) {
   ).join('');
 }
 
+// 取某 pair 最近 24h 的指标序列：[{time, value}]
+function sparkSeries(pair) {
+  const tEnd = new Date(allRuns[allRuns.length - 1].started_at).getTime();
+  const series = [];
+  for (const run of allRuns) {
+    const t = new Date(run.started_at).getTime();
+    if (t < tEnd - SPARK_WINDOW_MS) continue;
+    const point = runToPoints(run)[pair];
+    const v = point && point[activeMetric];
+    if (v != null) series.push({ time: t, value: v });
+  }
+  return series;
+}
+
+// 平滑曲线插值点（Catmull-Rom → bezier）
+function smoothPath(ctx, pts) {
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || pts[i + 1];
+    ctx.bezierCurveTo(
+      p1.x + (p2.x - p0.x) / 6, p1.y + (p2.y - p0.y) / 6,
+      p2.x - (p3.x - p1.x) / 6, p2.y - (p3.y - p1.y) / 6,
+      p2.x, p2.y
+    );
+  }
+}
+
 function renderResults(latestRun) {
   const el = document.getElementById('resultsCard');
   if (!latestRun || !latestRun.results.length) {
     el.innerHTML = '<div class="empty">暂无巡检数据</div>'; return;
   }
+  const visible = latestRun.results.filter(r => providerVisible(providerOf(r)));
+  if (!visible.length) { el.innerHTML = '<div class="empty">该 Provider 无数据</div>'; return; }
   // 按 tps 降序，失败排最后
-  const sorted = [...latestRun.results].sort((a, b) => {
+  const sorted = [...visible].sort((a, b) => {
     if (a.success !== b.success) return b.success - a.success;
     return (b.tps || 0) - (a.tps || 0);
   });
   const rows = sorted.map(r => {
     const model = r.actual_model && r.actual_model !== 'error' && r.actual_model !== r.model
       ? `${r.model}（${r.actual_model}）` : r.model;
-    const provider = r.provider_name || hostnameOf(r.base_url);
+    const provider = providerOf(r);
     const status = r.success
       ? '<span class="ok">✓</span>'
       : '<span class="fail">✗</span>';
@@ -419,7 +514,7 @@ function renderResults(latestRun) {
     const think = r.success && r.reasoning_tokens > 0
       ? `<span style="color:#c084fc">${r.reasoning_tokens}+${r.content_tokens}</span>` : '';
     const err = !r.success ? `<div class="err-msg" title="${escapeHtml(r.error_message || '')}">${escapeHtml(r.error_message || '')}</div>` : '';
-    return `<tr>
+    return `<tr data-pair="${escapeHtml(pairKey(r))}">
       <td>${status}</td>
       <td class="model-cell">${escapeHtml(model)}<span class="provider">${escapeHtml(provider)}</span></td>
       <td>${tps}</td>
@@ -427,11 +522,47 @@ function renderResults(latestRun) {
       <td class="hide-mobile">${ttft}</td>
       <td class="hide-mobile">${latency}</td>
       <td class="hide-mobile">${tokens} ${think}</td>
-    </tr>${err ? `<tr><td colspan="7" style="padding:0 16px 8px;border-bottom:1px solid var(--border)">${err}</td></tr>` : ''}`;
+      <td class="spark-cell hide-mobile"><canvas data-pair="${escapeHtml(pairKey(r))}" width="120" height="30"></canvas></td>
+    </tr>${err ? `<tr><td colspan="8" style="padding:0 16px 8px;border-bottom:1px solid var(--border)">${err}</td></tr>` : ''}`;
   }).join('');
   el.innerHTML = `<table class="results-table"><thead><tr>
-    <th style="width:30px"></th><th>模型</th><th>TPS</th><th class="hide-mobile">ITL</th><th class="hide-mobile">TTFT</th><th class="hide-mobile">延迟</th><th class="hide-mobile">Tokens</th>
+    <th style="width:30px"></th><th>模型</th><th>TPS</th><th class="hide-mobile">ITL</th><th class="hide-mobile">TTFT</th><th class="hide-mobile">延迟</th><th class="hide-mobile">Tokens</th><th class="hide-mobile" title="最近 24h · ${METRIC_LABELS[activeMetric]}">24h</th>
   </tr></thead><tbody>${rows}</tbody></table>`;
+  drawSparks();
+}
+
+// 行内 sparkline：24h 平滑曲线 + 最新值圆点，颜色跟 provider
+function drawSparks() {
+  document.querySelectorAll('.spark-cell canvas').forEach(cv => {
+    const series = sparkSeries(cv.dataset.pair);
+    if (series.length < 2) { cv.style.display = 'none'; return; }
+    const ctx = cv.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const w = 120, h = 30;
+    cv.width = w * dpr; cv.height = h * dpr;
+    cv.style.width = w + 'px'; cv.style.height = h + 'px';
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+
+    const [provider] = cv.dataset.pair.split('|');
+    const color = colorOf(provider);
+    const vals = series.map(d => d.value);
+    let vMin = Math.min(...vals), vMax = Math.max(...vals);
+    if (activeMetric === 'success_rate') { vMin = 0; vMax = 100; }
+    if (vMax === vMin) vMax = vMin + 1;
+    const tMin = series[0].time, tMax = series[series.length - 1].time;
+    const pts = series.map(d => ({
+      x: ((d.time - tMin) / (tMax - tMin || 1)) * (w - 4) + 2,
+      y: 3 + (1 - (d.value - vMin) / (vMax - vMin || 1)) * (h - 6),
+    }));
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    smoothPath(ctx, pts);
+    ctx.stroke();
+    const last = pts[pts.length - 1];
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(last.x, last.y, 2, 0, Math.PI * 2); ctx.fill();
+  });
 }
 
 function escapeHtml(s) {
@@ -484,7 +615,7 @@ function drawChart() {
     }
   }
 
-  const pairs = [...allPairs].sort();
+  const pairs = [...allPairs].filter(k => providerVisible(k.split('|')[0])).sort();
   // 默认全选
   if (activeKeys.size === 0) pairs.forEach(k => activeKeys.add(k));
 
@@ -528,24 +659,22 @@ function drawChart() {
     ctx.fillText(formatTime(t), x, pad.t + ch + 8);
   }
 
-  // 折线
+  // 平滑曲线
   visibleSeries.forEach((k, idx) => {
     const data = seriesByPair[k];
-    const color = CHART_COLORS[pairs.indexOf(k) % CHART_COLORS.length];
+    const color = colorOf(k.split('|')[0]);
     ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+    const pts = data.map(d => ({
+      x: pad.l + ((d.time - tMin) / (tMax - tMin || 1)) * cw,
+      y: pad.t + (1 - (d.value - vMin) / (vMax - vMin || 1)) * ch,
+    }));
     ctx.beginPath();
-    data.forEach((d, i) => {
-      const x = pad.l + ((d.time - tMin) / (tMax - tMin || 1)) * cw;
-      const y = pad.t + (1 - (d.value - vMin) / (vMax - vMin || 1)) * ch;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    });
+    smoothPath(ctx, pts);
     // 数据点
     ctx.stroke();
     ctx.fillStyle = color;
-    data.forEach(d => {
-      const x = pad.l + ((d.time - tMin) / (tMax - tMin || 1)) * cw;
-      const y = pad.t + (1 - (d.value - vMin) / (vMax - vMin || 1)) * ch;
-      ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
+    pts.forEach(p => {
+      ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill();
     });
   });
 
@@ -569,8 +698,8 @@ function formatTime(t) {
 
 function renderLegend(pairs, seriesByPair) {
   const el = document.getElementById('legend');
-  el.innerHTML = pairs.map((k, i) => {
-    const color = CHART_COLORS[i % CHART_COLORS.length];
+  el.innerHTML = pairs.map(k => {
+    const color = colorOf(k.split('|')[0]);
     const active = activeKeys.has(k);
     const has = !!seriesByPair[k];
     if (!has) return '';
@@ -597,6 +726,7 @@ document.querySelectorAll('[data-metric]').forEach(btn => {
     btn.classList.add('active');
     activeMetric = btn.dataset.metric;
     activeKeys.clear(); // 切换指标重置选中
+    renderResults(allRuns[allRuns.length - 1]); // 表头 tooltip + sparkline 跟随指标
     drawChart();
   });
 });
@@ -612,9 +742,11 @@ async function init() {
     return;
   }
   const latest = allRuns[allRuns.length - 1];
+  assignProviderColors(allRuns);
   renderNavStatus(latest);
   renderLastRun(latest);
   renderMetrics(latest);
+  renderProviderChips();
   renderResults(latest);
   drawChart();
 }
