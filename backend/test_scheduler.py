@@ -120,7 +120,7 @@ def test_run_schedule_success_updates_status_and_advances(db, monkeypatch):
 
     async def fake_execute(tests, prompt, max_tokens, temperature, stream,
                            concurrency, iterations, schedule_id=None,
-                           max_rpm=-1, on_progress=None, sink=None):
+                           max_rpm=-1, on_progress=None, sink=None, **kw):
         captured["tests"] = tests
         captured["schedule_id"] = schedule_id
         captured["prompt"] = prompt

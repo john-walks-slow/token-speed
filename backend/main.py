@@ -40,6 +40,7 @@ from .models import (
 )
 from .scheduler import SpeedTestScheduler
 from .speed_test import list_models, run_speed_test
+from .network_settings import client_kwargs as net_client_kwargs
 from .rate_limit import limiter
 from .security import admin_password, AdminAuthMiddleware
 from . import autostart, paths, network_settings as net_settings
@@ -76,7 +77,9 @@ app.add_middleware(AdminAuthMiddleware)
 
 @admin_router.post("/api/connect", response_model=ConnectResponse)
 async def connect(req: ConnectRequest):
-    success, result = await list_models(req.base_url, req.api_key, req.protocol)
+    success, result = await list_models(
+        req.base_url, req.api_key, req.protocol, client_kwargs=net_client_kwargs()
+    )
     if success:
         return ConnectResponse(success=True, models=result)
     return ConnectResponse(success=False, error=str(result))
@@ -93,6 +96,7 @@ async def speed_test(req: SpeedTestRequest):
         temperature=req.temperature,
         stream=req.stream,
         protocol=req.protocol,
+        client_kwargs=net_client_kwargs(),
     )
     await insert_speed_test(result)
     return SpeedTestResult(**result)
@@ -250,6 +254,7 @@ async def _iter_batch_results(req: BatchSpeedTestRequest, sink=None):
                     provider_id=item.provider_id,
                     provider_name=item.provider_name,
                     protocol=item.protocol,
+                    client_kwargs=net_client_kwargs(),
                 )
             except Exception as e:
                 r = _to_error_result(item, req, e, now_iso)

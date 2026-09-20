@@ -274,3 +274,51 @@ class TestComputeSummary:
         assert s.avg_tps == 30
         assert s.best_model == "gpt-4o"
         assert s.best_tps == 50
+
+
+def test_client_kwargs_default_and_injection():
+    """不传 client_kwargs 走默认（trust_env），传入时完整生效——adapter 注入契约的回归测试。"""
+    import asyncio
+
+    captured = {}
+
+    class FakeClient:
+        def __init__(self, *a, **kw):
+            captured.update(kw)
+
+        async def post(self, *a, **kw):
+            class FakeResp:
+                status_code = 200
+                async def aread(self):
+                    return b""
+                def raise_for_status(self):
+                    pass
+                def json(self):
+                    return {"model": "m", "choices": [{"message": {"content": "hi"}}],
+                            "usage": {"completion_tokens": 5, "prompt_tokens": 2}}
+            return FakeResp()
+
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return False
+
+    async def go(**kw):
+        captured.clear()
+        import backend.speed_test as st
+        orig = st.httpx.AsyncClient
+        st.httpx.AsyncClient = FakeClient
+        try:
+            return await run_speed_test("http://x", model="m", **kw)
+        finally:
+            st.httpx.AsyncClient = orig
+
+    r = asyncio.run(go())
+    assert r["success"] is True
+    assert captured["trust_env"] is True
+
+    r = asyncio.run(go(client_kwargs={"proxy": "http://127.0.0.1:7890", "verify": False, "trust_env": False}))
+    assert r["success"] is True
+    assert captured["proxy"] == "http://127.0.0.1:7890"
+    assert captured["verify"] is False
+    assert captured["trust_env"] is False

@@ -2,88 +2,15 @@
 
 适合个人使用的 LLM API 延迟与速度检测工具。监控多提供商的 TTFT / TPS / 思考时长 / token 拆分。
 
-**一个仓库，两种部署：**
-
-| | 桌面版 / 全栈版 | GitHub Actions 巡逻版 |
-|---|---|---|
-| 形态 | FastAPI + SQLite + React 桌面应用 | GitHub Actions cron + JSONL + 静态看板 |
-| 数据落地 | 本地 SQLite | 仓库内 JSONL（commit 回仓库） |
-| 入口 | `TokenSpeed.exe` / `uvicorn` | GitHub Pages 静态看板 |
-| 适合 | 自测、多服务商管理、定时测速 | 公开监控免费 LLM API 的速度与可用性 |
-| 共用 | **同一测速内核** `backend/speed_test.py` | **同一测速内核** |
-
-两种部署**数据独立、不合并**：桌面版看自己的 SQLite，巡逻看板看自己的 JSONL。测速内核通过 sink callback 解耦数据落地——内核不感知数据去向，桌面版注入 `sqlite_sink`，巡逻注入 `json_sink`。
+> 🛰️ **免服务器巡检版已独立成仓**：[token-speed-patrol](https://github.com/john-walks-slow/token-speed-patrol) — GitHub Actions 定时测速 + 静态看板，fork 自用。两仓库共用同一测速内核。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ![统计视图：模型对比与速度趋势](docs/assets/stats.png)
 
-![巡逻看板：免费 LLM API 的长期速度与可用性趋势](docs/features/260918-ui-polish/patrol-dashboard.png)
-
 ---
 
-## 一、GitHub Actions 巡逻版（免服务器）
-
-Fork 仓库 → 配置 Secrets → 启用 workflow → 看板自动跑起来。无需任何服务器。
-
-### 1. Fork 并配置 API 密钥
-
-在 **你的 fork 仓库 → Settings → Secrets and variables → Actions** 添加以下 secrets（按 [`config/patrol.json`](config/patrol.json) 中 `api_key_env` 字段名一一对应）：
-
-| Secret 名 | 从哪获取密钥 |
-|---|---|
-| `GROQ_API_KEY` | [console.groq.com/keys](https://console.groq.com/keys) — 永久免费层，无需信用卡 |
-| `NVIDIA_API_KEY` | [build.nvidia.com](https://build.nvidia.com/settings) — 免费试用额度，无需信用卡 |
-| `GEMINI_API_KEY` | [aistudio.google.com](https://aistudio.google.com/apikey) — 免费层，无需信用卡 |
-| `CLOUDFLARE_API_KEY` | [Cloudflare API Token](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/) — 10K Neurons/天免费层，无需信用卡 |
-| `OPENROUTER_API_KEY` | [openrouter.ai/keys](https://openrouter.ai/keys) — `:free` 模型免费（50 请求/天） |
-| `MODELSCOPE_API_KEY` | [modelscope.cn](https://modelscope.cn/my/mykeys) — 2000 次/天，需实名 |
-
-巡逻目标已内置为「2026 年仍值得一用的免费 LLM API」：Groq、NVIDIA NIM、Google Gemini、Cloudflare Workers AI、OpenRouter、ModelScope。密钥**绝不落盘**——`patrol.json` 只存环境变量名，巡逻 runner 从 `os.environ` 解析，结果 JSON 不含 `api_key`。
-
-### 2. 启用两个 workflow
-
-| Workflow | 作用 |
-|---|---|
-| **Token Speed Patrol** (`.github/workflows/patrol.yml`) | 按 cron 周期测速（默认每 6h，可在 yaml 改），结果 commit 回 `website/data/` |
-| **Deploy website** (`.github/workflows/deploy-website.yml`) | push master 自动发布 GitHub Pages |
-
-到 **Settings → Pages → Build and deployment → Source: GitHub Actions** 启用 Pages。
-
-### 3. 触发首次巡逻
-
-**Actions → Token Speed Patrol → Run workflow** 手动触发一次，确认产出 `website/data/YYYY-MM-DD.jsonl`。之后看板地址（`https://<你的用户名>.github.io/token-speed/`）即开始展示趋势。
-
-### 自定义巡逻目标
-
-编辑你 fork 的 `config/patrol.json`（结构见 [`config/patrol.json.example`](config/patrol.json.example)）：
-
-```json
-{
-  "prompt": "Hello, tell me a short story in 3 sentences.",
-  "max_tokens": 256,
-  "stream": true,
-  "targets": [
-    {
-      "provider_name": "你的服务商名",
-      "base_url": "https://api.xxx.com/v1",
-      "api_key_env": "YOUR_SECRET_NAME",
-      "protocol": "openai",
-      "models": ["model-id-1", "model-id-2"]
-    }
-  ]
-}
-```
-
-`protocol` 支持 `openai` 与 `anthropic`（Anthropic 原生端点用 `anthropic`）。新增服务商时，记得在 `patrol.yml` 的 `env:` 段加上对应的 `${{ secrets.XXX }}` 映射。
-
-**动态模型发现**：`"discover": true` 时 runner 会从上游 `{base_url}/models`（或 `discover_url` 指定的端点）拉取全量模型列表，与手写的 `models` 并集后依次过 `whitelist`、`blacklist`（均为 regex，fullmatch；whitelist 空 = 全保留）。上游新增/下架模型自动跟随，无需改配置。
-
-**巡检周期**：在 `patrol.yml` 的 `schedule.cron` 配置（默认每 6 小时）。**按需巡检**：手动 Run workflow 时填 `providers` 输入（逗号分隔 `provider_name`），只测指定服务商。
-
----
-
-## 二、桌面版 / 全栈版
+## 桌面版 / 全栈版
 
 ### 下载（Windows 免环境）
 
@@ -135,31 +62,20 @@ python build.py --zip   # 构建前端 + PyInstaller 打包 + 压缩
 
 ## 技术栈
 
-- **测速内核**：`backend/speed_test.py` — httpx 流式/非流式，OpenAI/Anthropic 协议，`_reconcile_token_counts` 统一 usage 口径。`execute_batch_tests` 通过 sink callback 解耦数据落地。
+- **测速内核**：`backend/speed_test.py` — httpx 流式/非流式，OpenAI/Anthropic 协议，`_reconcile_token_counts` 统一 usage 口径。网络参数（client_kwargs）由调用方注入，core 层无存储依赖。
 - **桌面版**：FastAPI + SQLite + httpx，asyncio 调度器，SSE 流式推送。
 - **前端**：React 19 + TypeScript + Vite + Tailwind v4 + Recharts，shadcn/ui 风格组件。
-- **巡逻看板**：`website/index.html` — 零构建纯 JS + 原生 Canvas 图表，与桌面版共享深色主题。
 
 ## 目录结构
 
 ```
 backend/
-  speed_test.py      # 测速核心（sink callback 解耦；两套部署共用）
-  main.py            # FastAPI 主应用（桌面版 adapter，传 sqlite_sink）
-  patrol_config.py   # 巡逻配置契约（PatrolConfig，core 层同构不同源）
-  patrol_runner.py   # 巡逻入口（python -m backend.patrol_runner，传 json_sink）
-  scheduler.py       # 桌面版定时调度
+  speed_test.py      # 测速核心（client_kwargs 注入；与 token-speed-patrol 同源）
+  main.py            # FastAPI 主应用（adapter 层，注入 client_kwargs 与 sqlite_sink）
+  scheduler.py       # 定时调度
   database.py        # SQLite 访问 + schema 迁移
-config/
-  patrol.json         # 巡逻配置（fork 后改这个 + 填 secrets）
-  patrol.json.example # 配置示例
-website/
-  index.html          # 巡逻看板（零构建），GitHub Pages 唯一入口
-  data/               # 巡逻 JSONL 结果（workflow 自动 commit）
 .github/workflows/
-  patrol.yml          # 巡逻 cron（每6h）+ 结果 commit
-  deploy-website.yml  # GitHub Pages 部署
-  release.yml         # tag v* 触发 Windows 打包
+  release.yml        # tag v* 触发 Windows 打包
 ```
 
 ## 文档

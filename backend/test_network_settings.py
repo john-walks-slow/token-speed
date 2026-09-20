@@ -162,8 +162,11 @@ def test_list_models_applies_proxy(db, monkeypatch):
 
     monkeypatch.setattr("backend.speed_test.httpx.AsyncClient", fake_client)
 
+    from backend.network_settings import client_kwargs
     from backend.speed_test import list_models
-    ok, result = asyncio.run(list_models("https://api.example.com/v1", "sk-test"))
+    ok, result = asyncio.run(list_models(
+        "https://api.example.com/v1", "sk-test", client_kwargs=client_kwargs(),
+    ))
     assert ok is True
     assert captured["proxy"] == "http://127.0.0.1:7890"
     assert captured["verify"] is False
@@ -183,9 +186,11 @@ def test_run_speed_test_applies_proxy(db, monkeypatch):
 
     monkeypatch.setattr("backend.speed_test.httpx.AsyncClient", fake_client)
 
+    from backend.network_settings import client_kwargs
     from backend.speed_test import run_speed_test
     result = asyncio.run(run_speed_test(
         base_url="https://api.example.com/v1", model="gpt-4",
+        client_kwargs=client_kwargs(),
     ))
     assert result["success"] is True
     assert captured["trust_env"] is False

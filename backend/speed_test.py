@@ -8,8 +8,11 @@ from datetime import datetime, timezone
 import httpx
 
 from .rate_limit import limiter
-from .network_settings import client_kwargs as net_client_kwargs
 from .url_utils import normalize_base_url
+
+# core 层不依赖桌面版的 SQLite 设置；网络参数由调用方注入（如桌面版传
+# network_settings.client_kwargs()），不传时用默认：跟随环境代理、系统 TLS 校验
+DEFAULT_CLIENT_KWARGS = {"trust_env": True}
 
 
 def _reconcile_token_counts(completion_tokens: int, reasoning_tokens: int) -> tuple[int, int, int]:
@@ -128,7 +131,12 @@ def _extract_stream_chunk(chunk: dict, protocol: str) -> dict:
     }
 
 
-async def list_models(base_url: str, api_key: str = "", protocol: str = "openai") -> tuple[bool, list[dict] | str]:
+async def list_models(
+    base_url: str,
+    api_key: str = "",
+    protocol: str = "openai",
+    client_kwargs: dict | None = None,
+) -> tuple[bool, list[dict] | str]:
     """Fetch available models from an OpenAI-compatible / Anthropic API endpoint.
 
     base_url 需自带路径（含 /v1 等），不再自动拼接。
@@ -145,7 +153,7 @@ async def list_models(base_url: str, api_key: str = "", protocol: str = "openai"
             headers["Authorization"] = f"Bearer {api_key}"
 
     try:
-        async with httpx.AsyncClient(timeout=10.0, **net_client_kwargs()) as client:
+        async with httpx.AsyncClient(timeout=10.0, **(client_kwargs or DEFAULT_CLIENT_KWARGS)) as client:
             resp = await client.get(url, headers=headers)
             resp.raise_for_status()
             data = resp.json()
@@ -183,6 +191,7 @@ async def run_speed_test(
     provider_name: str = "",
     protocol: str = "openai",
     timeout: float | None = None,
+    client_kwargs: dict | None = None,
 ) -> dict:
     """Run a single speed test against an OpenAI-compatible / Anthropic native API.
 
@@ -253,7 +262,7 @@ async def run_speed_test(
             first_content_token = True
             content_parts: list[str] = []
 
-            async with httpx.AsyncClient(timeout=timeout or 120.0, **net_client_kwargs()) as client:
+            async with httpx.AsyncClient(timeout=timeout or 120.0, **(client_kwargs or DEFAULT_CLIENT_KWARGS)) as client:
                 async with client.stream("POST", url, json=payload, headers=headers) as resp:
                     await _raise_for_openai_error(resp)
                     async for line in resp.aiter_lines():
@@ -320,7 +329,7 @@ async def run_speed_test(
             response_content = "".join(content_parts) or None
             total_latency_ms = (time.perf_counter() - start) * 1000
         else:
-            async with httpx.AsyncClient(timeout=timeout or 120.0, **net_client_kwargs()) as client:
+            async with httpx.AsyncClient(timeout=timeout or 120.0, **(client_kwargs or DEFAULT_CLIENT_KWARGS)) as client:
                 resp = await client.post(url, json=payload, headers=headers)
                 await _raise_for_openai_error(resp)
                 data = resp.json()
@@ -426,6 +435,7 @@ async def execute_batch_tests(
     on_progress: Callable[[dict], Awaitable[None]] | None = None,
     sink: Callable[[dict], Awaitable[None]] | None = None,
     timeout: float | None = None,
+    client_kwargs: dict | None = None,
 ) -> list[dict]:
     """批量执行测速。batch 端点与定时调度器、巡检 runner 共用。
 
@@ -469,6 +479,7 @@ async def execute_batch_tests(
                     provider_name=item.get("provider_name", ""),
                     protocol=item.get("protocol", "openai"),
                     timeout=timeout,
+                    client_kwargs=client_kwargs,
                 )
             except Exception as e:
                 return _batch_error_result(e, item, prompt, max_tokens, temperature)

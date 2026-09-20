@@ -13,6 +13,7 @@ from .database import (
     update_schedule_run_status,
 )
 from .speed_test import execute_batch_tests
+from .network_settings import client_kwargs as net_client_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +142,7 @@ class SpeedTestScheduler:
                 max_rpm=sched["max_rpm"] if sched["max_rpm"] is not None else -1,
                 on_progress=on_progress,
                 sink=sqlite_sink,
+                client_kwargs=net_client_kwargs(),
             )
             ok = sum(1 for r in results if r["success"])
             if ok == len(results):
