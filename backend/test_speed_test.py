@@ -114,11 +114,11 @@ class TestBackfillTps:
 
 
 class TestItl:
-    """ITL 口径：(总耗时 - content_ttft) / content_tokens，仅流式可测。"""
+    """ITL 口径：(总耗时 - content_ttft) / (content_tokens - 1)，TPOT 标准，仅流式可测。"""
 
     def test_formula(self):
-        # 100 token 正文，首字 2s，总耗时 5s → 发射耗时 3s → ITL = 30ms/token
-        assert round(_compute_itl(100, 2000.0, 5000.0), 2) == 30.0
+        # 100 token 正文，首字 2s，总耗时 5s → 剩余 99 个 token 分摊 3s → ITL ≈ 30.3ms/token
+        assert round(_compute_itl(100, 2000.0, 5000.0), 2) == 30.3
 
     def test_non_stream_no_content_ttft(self):
         assert _compute_itl(100, None, 5000.0) is None
