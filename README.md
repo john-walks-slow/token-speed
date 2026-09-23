@@ -12,7 +12,7 @@
 
 ## 桌面版 / 全栈版
 
-### 下载（Windows 免环境）
+### 下载
 
 从 [GitHub Releases](https://github.com/john-walks-slow/token-speed/releases) 下载 `TokenSpeed-vX.X.X-win64.zip`，解压双击 `TokenSpeed.exe` 即可（免 Python / Node）。数据保存在 `%APPDATA%\TokenSpeed\`，托盘图标可最小化/退出，`--hidden` 参数支持开机自启。
 
@@ -81,6 +81,10 @@ backend/
 ## 文档
 
 功能开发记录见 `docs/features/`（plan / validation / review / summary）。模块级指引见 `AGENTS.md`。
+
+## 外链
+
+[linux.do](linux.do)
 
 ## License
 
